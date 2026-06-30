@@ -14,7 +14,6 @@ st.markdown("Generates a highly complex, 3D multi-body B-Rep solid model of a ri
 # ==========================================
 # UI: STATE MANAGEMENT
 # ==========================================
-# This allows the AI to actively overwrite the numbers on the screen!
 if "tube_data" not in st.session_state:
     st.session_state.tube_data = [
         [440.615, -97.153, 241.057, 47.30],
@@ -53,7 +52,6 @@ if api_key:
         st.sidebar.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        # Inject instructions for the AI to become an "Active Editor"
         context = f"""
         You are an expert Mechanical CAD AI Assistant helping a user design a ribbed intake tube.
         The current active data (7 points, format: [X, Y, Z, Diameter]) is:
@@ -61,12 +59,16 @@ if api_key:
         
         RULES:
         1. If the user asks a general question, just reply normally.
-        2. If the user asks you to modify the tube (e.g., "make point 3 thicker", "shift the tube left"), YOU MUST output the full updated list of all 7 points inside a JSON code block like this:
+        2. If the user asks you to modify the tube, YOU MUST output the full updated list of all 7 points inside a JSON code block like this:
         ```json
         [
           [x1, y1, z1, dia1],
           [x2, y2, z2, dia2],
-          ... all 7 points ...
+          [x3, y3, z3, dia3],
+          [x4, y4, z4, dia4],
+          [x5, y5, z5, dia5],
+          [x6, y6, z6, dia6],
+          [x7, y7, z7, dia7]
         ]
         ```
         Always include the JSON block if a change is requested, followed by a brief explanation.
@@ -79,7 +81,6 @@ if api_key:
                 response = model.generate_content(context)
                 ai_reply = response.text
                 
-                # Intercept AI reply to look for JSON updates
                 json_match = re.search(r'```json\n(.*?)\n```', ai_reply, re.DOTALL)
                 
                 if json_match:
@@ -89,11 +90,10 @@ if api_key:
                             st.session_state.tube_data = new_data
                             update_msg = "✅ **I have updated the parameters on your screen!** Please review the numbers and click the **Generate Intake Tube Model** button to render your changes."
                             st.session_state.messages.append({"role": "assistant", "content": update_msg})
-                            st.rerun() # Refresh the webpage instantly with new numbers
+                            st.rerun() 
                     except Exception as e:
                         st.sidebar.error("Failed to apply AI changes.")
                 
-                # If no JSON or after JSON parsing, display normal text
                 clean_reply = re.sub(r'```json\n(.*?)\n```', '', ai_reply, flags=re.DOTALL).strip()
                 if clean_reply:
                     st.sidebar.chat_message("assistant").markdown(clean_reply)
@@ -118,25 +118,23 @@ cols[2].markdown("**Y**")
 cols[3].markdown("**Z**")
 cols[4].markdown("**Outer Dia (mm)**")
 
-# UI loop securely bound to the session state (so AI can update them)
 for i in range(7):
     dx, dy, dz, ddia = st.session_state.tube_data[i]
     cols = st.columns([1, 2, 2, 2, 2])
     cols[0].markdown(f"**P{i+1}**")
     
-    x = cols[1].number_input(f"X{i+1}", value=float(dx), format="%.3f", label_visibility="collapsed")
-    y = cols[2].number_input(f"Y{i+1}", value=float(dy), format="%.3f", label_visibility="collapsed")
-    z = cols[3].number_input(f"Z{i+1}", value=float(dz), format="%.3f", label_visibility="collapsed")
-    dia = cols[4].number_input(f"Dia{i+1}", value=float(ddia), format="%.3f", label_visibility="collapsed")
+    x = cols[1].number_input(f"X{i+1}", value=float(dx), format="%.3f", key=f"x{i}", label_visibility="collapsed")
+    y = cols[2].number_input(f"Y{i+1}", value=float(dy), format="%.3f", key=f"y{i}", label_visibility="collapsed")
+    z = cols[3].number_input(f"Z{i+1}", value=float(dz), format="%.3f", key=f"z{i}", label_visibility="collapsed")
+    dia = cols[4].number_input(f"Dia{i+1}", value=float(ddia), format="%.3f", key=f"d{i}", label_visibility="collapsed")
     
-    # Save manual user edits back to state
     st.session_state.tube_data[i] = [x, y, z, dia]
     user_data.append(((x, y, z), dia / 2.0))
 
 st.markdown("---")
 
 # ==========================================
-# CAD GENERATION LOGIC (GOLDEN CODE)
+# CAD GENERATION LOGIC 
 # ==========================================
 if st.button("Generate Intake Tube Model"):
     status_text = st.empty()
@@ -269,14 +267,17 @@ if st.button("Generate Intake Tube Model"):
                 plane_rev = cq.Plane(origin=pos, xDir=tangent, normal=normal_rev)
 
                 ring_prof = (cq.Workplane(plane_rev)
-                    .moveTo(-1.25, R + 2.5)
-                    .lineTo( 1.25, R + 2.5)
+                    .moveTo(-0.75, R + 2.6)
+                    .lineTo( 0.75, R + 2.6)
+                    .threePointArc((1.1035, R + 2.4535), (1.25, R + 2.1)) 
                     .lineTo( 1.25, R + 1.5)
                     .threePointArc((1.5429, R + 0.7929), (2.25, R + 0.5)) 
                     .lineTo( 2.25, R - 0.5)
                     .lineTo(-2.25, R - 0.5)
                     .lineTo(-2.25, R + 0.5)
                     .threePointArc((-1.5429, R + 0.7929), (-1.25, R + 1.5)) 
+                    .lineTo(-1.25, R + 2.1)
+                    .threePointArc((-1.1035, R + 2.4535), (-0.75, R + 2.6)) 
                     .close()
                 )
 
@@ -348,7 +349,7 @@ if st.button("Generate Intake Tube Model"):
             plane_gap = cq.Plane(origin=p3_pos + (p3_tangent * mount_thick), xDir=x_dir_p3, normal=p3_tangent)
             gap_rib_remover = (cq.Workplane(plane_gap)
                 .circle(p3_rad + rib_h + 5.0) 
-                .circle(p3_rad + 0.05)               
+                .circle(p3_rad)               
                 .extrude(mount_gap).val())
                 
             c2_offset = mount_thick + mount_gap
@@ -365,23 +366,20 @@ if st.button("Generate Intake Tube Model"):
                 .loft(combine=False).val())
                 
             # ==========================================
-            # 8. FIXED BOOLEAN FUSION
+            # 8. BOOLEAN FUSION (Exactly from your Golden Code)
             # ==========================================
-            status_text.info("Fusing all bodies into a single water-tight Solid (Please wait ~15s)...")
+            status_text.info("Fusing all bodies into a single water-tight Solid (Please wait ~12s)...")
+            all_rings = cq.Compound.makeCompound(ring_list)
             
             main_body = cq.Workplane().add(solid_outer)
-            for ring in ring_list:
-                main_body = main_body.union(cq.Workplane().add(ring))
-                
-            main_body = (main_body
-                .union(cq.Workplane().add(flange_fillet))
-                .union(cq.Workplane().add(throttle_cyl))
-                .union(cq.Workplane().add(throttle_rib_1))
-                .union(cq.Workplane().add(throttle_rib_2)))
-                
             main_body = main_body.cut(cq.Workplane().add(gap_rib_remover))
             
             main_body = (main_body
+                .union(cq.Workplane().add(all_rings))
+                .union(cq.Workplane().add(flange_fillet))
+                .union(cq.Workplane().add(throttle_cyl))
+                .union(cq.Workplane().add(throttle_rib_1))
+                .union(cq.Workplane().add(throttle_rib_2))
                 .union(cq.Workplane().add(mount_c1))
                 .union(cq.Workplane().add(mount_c1_fillet))
                 .union(cq.Workplane().add(mount_c2))
@@ -417,6 +415,7 @@ if st.button("Generate Intake Tube Model"):
                     "showHidden": False
                 }
                 
+                # Export the underlying shape to ensure SVG catches everything cleanly
                 cq.exporters.export(final_solid_tube.val(), svg_path, exportType='SVG', opt=opt)
                 
                 with open(svg_path, "r") as f:
@@ -453,4 +452,31 @@ if st.button("Generate Intake Tube Model"):
             st.success(f"✅ SUCCESS! Solid Part and Web Renders generated in {round(end_time - start_time, 1)} seconds.")
             
             st.markdown("### Interactive Engineering Views")
-            tabs = st.tabs(list(view_angles.k
+            tabs = st.tabs(list(view_angles.keys()))
+            
+            for idx, view_name in enumerate(view_angles.keys()):
+                with tabs[idx]:
+                    html_wrapper = f"""
+                    <div style="text-align: center; background-color: #ffffff; border: 2px solid #e6e6e6; padding: 15px; border-radius: 8px;">
+                        {svg_contents[view_name]}
+                    </div>
+                    """
+                    st.markdown(html_wrapper, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            with open(filepath, "rb") as file:
+                st.download_button(
+                    label="⬇️ Download 3D STEP File",
+                    data=file,
+                    file_name=filename,
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+
+        except ValueError as ve:
+            status_text.empty()
+            st.error(str(ve))
+        except Exception as e:
+            status_text.empty()
+            st.error(f"An unexpected error occurred during geometric modeling:\n{e}")
