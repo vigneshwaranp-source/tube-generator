@@ -36,7 +36,6 @@ if api_key:
         st.sidebar.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        # Inject live UI data into the AI's context
         context = f"""
         You are an expert Mechanical CAD assistant helping a user design a ribbed intake tube. 
         Here is the live data currently entered on the user's screen:
@@ -227,17 +226,14 @@ if st.button("Generate Intake Tube Model"):
                 plane_rev = cq.Plane(origin=pos, xDir=tangent, normal=normal_rev)
 
                 ring_prof = (cq.Workplane(plane_rev)
-                    .moveTo(-0.75, R + 2.6)
-                    .lineTo( 0.75, R + 2.6)
-                    .threePointArc((1.1035, R + 2.4535), (1.25, R + 2.1)) 
+                    .moveTo(-1.25, R + 2.5)
+                    .lineTo( 1.25, R + 2.5)
                     .lineTo( 1.25, R + 1.5)
                     .threePointArc((1.5429, R + 0.7929), (2.25, R + 0.5)) 
                     .lineTo( 2.25, R - 0.5)
                     .lineTo(-2.25, R - 0.5)
                     .lineTo(-2.25, R + 0.5)
                     .threePointArc((-1.5429, R + 0.7929), (-1.25, R + 1.5)) 
-                    .lineTo(-1.25, R + 2.1)
-                    .threePointArc((-1.1035, R + 2.4535), (-0.75, R + 2.6)) 
                     .close()
                 )
 
@@ -306,10 +302,11 @@ if st.button("Generate Intake Tube Model"):
                 .circle(c1_r)
                 .loft(combine=False).val())
                 
+            # FIX: Added + 0.05 to inner circle to prevent zero-thickness coincident face deletion!
             plane_gap = cq.Plane(origin=p3_pos + (p3_tangent * mount_thick), xDir=x_dir_p3, normal=p3_tangent)
             gap_rib_remover = (cq.Workplane(plane_gap)
                 .circle(p3_rad + rib_h + 5.0) 
-                .circle(p3_rad)               
+                .circle(p3_rad + 0.05)               
                 .extrude(mount_gap).val())
                 
             c2_offset = mount_thick + mount_gap
@@ -326,25 +323,35 @@ if st.button("Generate Intake Tube Model"):
                 .loft(combine=False).val())
                 
             # ==========================================
-            # 8. BOOLEAN FUSION
+            # 8. FIXED BOOLEAN FUSION
             # ==========================================
-            status_text.info("Fusing all bodies into a single water-tight Solid (Please wait ~12s)...")
-            all_rings = cq.Compound.makeCompound(ring_list)
+            status_text.info("Fusing all bodies into a single water-tight Solid (Please wait ~15s)...")
             
+            # Step 1: Base Tube
             main_body = cq.Workplane().add(solid_outer)
-            main_body = main_body.cut(cq.Workplane().add(gap_rib_remover))
             
+            # Step 2: Iteratively add rings to prevent Compound boolean crashes
+            for ring in ring_list:
+                main_body = main_body.union(cq.Workplane().add(ring))
+                
+            # Step 3: Add Throttle Flanges
             main_body = (main_body
-                .union(cq.Workplane().add(all_rings))
                 .union(cq.Workplane().add(flange_fillet))
                 .union(cq.Workplane().add(throttle_cyl))
                 .union(cq.Workplane().add(throttle_rib_1))
-                .union(cq.Workplane().add(throttle_rib_2))
+                .union(cq.Workplane().add(throttle_rib_2)))
+                
+            # Step 4: Cut the gap using the fixed 0.05mm clearance tool
+            main_body = main_body.cut(cq.Workplane().add(gap_rib_remover))
+            
+            # Step 5: Add P3 Mounts
+            main_body = (main_body
                 .union(cq.Workplane().add(mount_c1))
                 .union(cq.Workplane().add(mount_c1_fillet))
                 .union(cq.Workplane().add(mount_c2))
                 .union(cq.Workplane().add(mount_c2_fillet)))
                 
+            # Step 6: Hollow out the inner core
             final_solid_tube = main_body.cut(cq.Workplane().add(solid_inner))
             
             # ==========================================
@@ -360,7 +367,7 @@ if st.button("Generate Intake Tube Model"):
                 "Side": (1, 0, 0)
             }
             
-            svg_paths = {}
+            svg_contents = {}
             for view_name, proj_dir in view_angles.items():
                 svg_path = os.path.join(os.getcwd(), f"{view_name}.svg")
                 opt = {
@@ -374,11 +381,17 @@ if st.button("Generate Intake Tube Model"):
                     "strokeColor": (0, 0, 0),
                     "showHidden": False
                 }
-                cq.exporters.export(final_solid_tube, svg_path, exportType='SVG', opt=opt)
-                svg_paths[view_name] = svg_path
+                
+                # FIX: Export the underlying TopoDS_Shape (.val()) instead of the Workplane 
+                # This guarantees the SVG engine processes the fully fused solid geometry!
+                cq.exporters.export(final_solid_tube.val(), svg_path, exportType='SVG', opt=opt)
+                
+                with open(svg_path, "r") as f:
+                    svg_contents[view_name] = f.read()
+                os.remove(svg_path) 
 
             # ==========================================
-            # 10. EXPORT ASSEMBLY WITH REFERENCES
+            # 10. EXPORT ASSEMBLY & RENDER UI
             # ==========================================
             status_text.info("Packaging Solid Body and Wireframes into STEP format...")
             assy = cq.Assembly()
@@ -389,15 +402,12 @@ if st.button("Generate Intake Tube Model"):
                 p_coord = pts[i]
                 r = radii[i]
                 t = t_control[i]
-
                 tangent = wire.tangentAt(t)
                 x_dir = tangent.cross(global_up)
                 if x_dir.Length < 0.001: x_dir = tangent.cross(cq.Vector(0, 1, 0))
                 plane = cq.Plane(origin=cq.Vector(p_coord), xDir=x_dir, normal=tangent)
-
                 pt_vertex = cq.Vertex.makeVertex(*p_coord)
                 assy.add(pt_vertex, name=f"Ref_Point_{i+1}", color=cq.Color("black"))
-
                 ref_circle = cq.Workplane(plane).circle(r).wire().val()
                 assy.add(ref_circle, name=f"Ref_Circle_{i+1}", color=cq.Color("green"))
                 
@@ -409,18 +419,22 @@ if st.button("Generate Intake Tube Model"):
             status_text.empty() 
             st.success(f"✅ SUCCESS! Solid Part and Web Renders generated in {round(end_time - start_time, 1)} seconds.")
             
-            # --- DISPLAY RENDERS DIRECTLY ON THE WEBPAGE ---
             st.markdown("### Interactive Engineering Views")
             tabs = st.tabs(list(view_angles.keys()))
             for idx, view_name in enumerate(view_angles.keys()):
                 with tabs[idx]:
-                    st.image(svg_paths[view_name], use_container_width=True)
+                    html_wrapper = f"""
+                    <div style="text-align: center; background-color: #ffffff; border: 2px solid #e6e6e6; padding: 15px; border-radius: 8px;">
+                        {svg_contents[view_name]}
+                    </div>
+                    """
+                    st.markdown(html_wrapper, unsafe_allow_html=True)
             
             st.markdown("---")
             
             with open(filepath, "rb") as file:
                 st.download_button(
-                    label="⬇️ Download STEP File",
+                    label="⬇️ Download 3D STEP File",
                     data=file,
                     file_name=filename,
                     mime="application/octet-stream",
