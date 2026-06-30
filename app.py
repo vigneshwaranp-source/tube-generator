@@ -3,6 +3,8 @@ import cadquery as cq
 import time
 import math
 import os
+import json
+import re
 import google.generativeai as genai
 
 st.set_page_config(layout="wide", page_title="Solid Tube Generator")
@@ -10,10 +12,25 @@ st.title("Lightning Fast Solid Tube Generator")
 st.markdown("Generates a highly complex, 3D multi-body B-Rep solid model of a ribbed intake tube.")
 
 # ==========================================
+# UI: STATE MANAGEMENT
+# ==========================================
+# This allows the AI to actively overwrite the numbers on the screen!
+if "tube_data" not in st.session_state:
+    st.session_state.tube_data = [
+        [440.615, -97.153, 241.057, 47.30],
+        [434.009, -96.510, 238.835, 36.50],
+        [388.715, -83.605, 223.622, 36.50],
+        [358.672, -53.470, 213.579, 36.50],
+        [350.239, -35.836, 212.048, 36.50],
+        [288.364,  -3.164, 214.017, 36.50],
+        [250.908,  -2.078, 208.424, 41.144]
+    ]
+
+# ==========================================
 # 🤖 AI ASSISTANT (SIDEBAR)
 # ==========================================
 st.sidebar.title("🤖 CAD AI Assistant")
-st.sidebar.markdown("Ask me to analyze your current tube parameters!")
+st.sidebar.markdown("Ask me to analyze parameters, or command me to change the tube!")
 
 api_key = None
 if "GEMINI_API_KEY" in st.secrets:
@@ -36,10 +53,25 @@ if api_key:
         st.sidebar.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
+        # Inject instructions for the AI to become an "Active Editor"
         context = f"""
-        You are an expert Mechanical CAD assistant helping a user design a ribbed intake tube. 
-        Here is the live data currently entered on the user's screen:
-        The user is asking: {prompt}
+        You are an expert Mechanical CAD AI Assistant helping a user design a ribbed intake tube.
+        The current active data (7 points, format: [X, Y, Z, Diameter]) is:
+        {st.session_state.tube_data}
+        
+        RULES:
+        1. If the user asks a general question, just reply normally.
+        2. If the user asks you to modify the tube (e.g., "make point 3 thicker", "shift the tube left"), YOU MUST output the full updated list of all 7 points inside a JSON code block like this:
+        ```json
+        [
+          [x1, y1, z1, dia1],
+          [x2, y2, z2, dia2],
+          ... all 7 points ...
+        ]
+        ```
+        Always include the JSON block if a change is requested, followed by a brief explanation.
+        
+        User prompt: {prompt}
         """
         
         with st.sidebar.spinner("Thinking..."):
@@ -47,8 +79,26 @@ if api_key:
                 response = model.generate_content(context)
                 ai_reply = response.text
                 
-                st.sidebar.chat_message("assistant").markdown(ai_reply)
-                st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+                # Intercept AI reply to look for JSON updates
+                json_match = re.search(r'```json\n(.*?)\n```', ai_reply, re.DOTALL)
+                
+                if json_match:
+                    try:
+                        new_data = json.loads(json_match.group(1))
+                        if len(new_data) == 7:
+                            st.session_state.tube_data = new_data
+                            update_msg = "✅ **I have updated the parameters on your screen!** Please review the numbers and click the **Generate Intake Tube Model** button to render your changes."
+                            st.session_state.messages.append({"role": "assistant", "content": update_msg})
+                            st.rerun() # Refresh the webpage instantly with new numbers
+                    except Exception as e:
+                        st.sidebar.error("Failed to apply AI changes.")
+                
+                # If no JSON or after JSON parsing, display normal text
+                clean_reply = re.sub(r'```json\n(.*?)\n```', '', ai_reply, flags=re.DOTALL).strip()
+                if clean_reply:
+                    st.sidebar.chat_message("assistant").markdown(clean_reply)
+                    st.session_state.messages.append({"role": "assistant", "content": clean_reply})
+                    
             except Exception as e:
                 st.sidebar.error(f"AI Connection Error: {e}")
 else:
@@ -59,17 +109,6 @@ else:
 # UI: USER INPUTS FOR POINTS AND DIAMETERS
 # ==========================================
 st.subheader("Trajectory Coordinates & Diameters")
-
-default_data = [
-    (440.615, -97.153, 241.057, 47.30),
-    (434.009, -96.510, 238.835, 36.50),
-    (388.715, -83.605, 223.622, 36.50),
-    (358.672, -53.470, 213.579, 36.50),
-    (350.239, -35.836, 212.048, 36.50),
-    (288.364,  -3.164, 214.017, 36.50),
-    (250.908,  -2.078, 208.424, 41.144)
-]
-
 user_data = []
 
 cols = st.columns([1, 2, 2, 2, 2])
@@ -79,21 +118,25 @@ cols[2].markdown("**Y**")
 cols[3].markdown("**Z**")
 cols[4].markdown("**Outer Dia (mm)**")
 
-for i, (dx, dy, dz, ddia) in enumerate(default_data):
+# UI loop securely bound to the session state (so AI can update them)
+for i in range(7):
+    dx, dy, dz, ddia = st.session_state.tube_data[i]
     cols = st.columns([1, 2, 2, 2, 2])
     cols[0].markdown(f"**P{i+1}**")
     
-    x = cols[1].number_input(f"X{i+1}", value=dx, format="%.3f", key=f"x{i}", label_visibility="collapsed")
-    y = cols[2].number_input(f"Y{i+1}", value=dy, format="%.3f", key=f"y{i}", label_visibility="collapsed")
-    z = cols[3].number_input(f"Z{i+1}", value=dz, format="%.3f", key=f"z{i}", label_visibility="collapsed")
-    dia = cols[4].number_input(f"Dia{i+1}", value=ddia, format="%.3f", key=f"d{i}", label_visibility="collapsed")
+    x = cols[1].number_input(f"X{i+1}", value=float(dx), format="%.3f", label_visibility="collapsed")
+    y = cols[2].number_input(f"Y{i+1}", value=float(dy), format="%.3f", label_visibility="collapsed")
+    z = cols[3].number_input(f"Z{i+1}", value=float(dz), format="%.3f", label_visibility="collapsed")
+    dia = cols[4].number_input(f"Dia{i+1}", value=float(ddia), format="%.3f", label_visibility="collapsed")
     
+    # Save manual user edits back to state
+    st.session_state.tube_data[i] = [x, y, z, dia]
     user_data.append(((x, y, z), dia / 2.0))
 
 st.markdown("---")
 
 # ==========================================
-# CAD GENERATION LOGIC
+# CAD GENERATION LOGIC (GOLDEN CODE)
 # ==========================================
 if st.button("Generate Intake Tube Model"):
     status_text = st.empty()
@@ -302,7 +345,6 @@ if st.button("Generate Intake Tube Model"):
                 .circle(c1_r)
                 .loft(combine=False).val())
                 
-            # FIX: Added + 0.05 to inner circle to prevent zero-thickness coincident face deletion!
             plane_gap = cq.Plane(origin=p3_pos + (p3_tangent * mount_thick), xDir=x_dir_p3, normal=p3_tangent)
             gap_rib_remover = (cq.Workplane(plane_gap)
                 .circle(p3_rad + rib_h + 5.0) 
@@ -327,31 +369,24 @@ if st.button("Generate Intake Tube Model"):
             # ==========================================
             status_text.info("Fusing all bodies into a single water-tight Solid (Please wait ~15s)...")
             
-            # Step 1: Base Tube
             main_body = cq.Workplane().add(solid_outer)
-            
-            # Step 2: Iteratively add rings to prevent Compound boolean crashes
             for ring in ring_list:
                 main_body = main_body.union(cq.Workplane().add(ring))
                 
-            # Step 3: Add Throttle Flanges
             main_body = (main_body
                 .union(cq.Workplane().add(flange_fillet))
                 .union(cq.Workplane().add(throttle_cyl))
                 .union(cq.Workplane().add(throttle_rib_1))
                 .union(cq.Workplane().add(throttle_rib_2)))
                 
-            # Step 4: Cut the gap using the fixed 0.05mm clearance tool
             main_body = main_body.cut(cq.Workplane().add(gap_rib_remover))
             
-            # Step 5: Add P3 Mounts
             main_body = (main_body
                 .union(cq.Workplane().add(mount_c1))
                 .union(cq.Workplane().add(mount_c1_fillet))
                 .union(cq.Workplane().add(mount_c2))
                 .union(cq.Workplane().add(mount_c2_fillet)))
                 
-            # Step 6: Hollow out the inner core
             final_solid_tube = main_body.cut(cq.Workplane().add(solid_inner))
             
             # ==========================================
@@ -382,8 +417,6 @@ if st.button("Generate Intake Tube Model"):
                     "showHidden": False
                 }
                 
-                # FIX: Export the underlying TopoDS_Shape (.val()) instead of the Workplane 
-                # This guarantees the SVG engine processes the fully fused solid geometry!
                 cq.exporters.export(final_solid_tube.val(), svg_path, exportType='SVG', opt=opt)
                 
                 with open(svg_path, "r") as f:
@@ -420,30 +453,4 @@ if st.button("Generate Intake Tube Model"):
             st.success(f"✅ SUCCESS! Solid Part and Web Renders generated in {round(end_time - start_time, 1)} seconds.")
             
             st.markdown("### Interactive Engineering Views")
-            tabs = st.tabs(list(view_angles.keys()))
-            for idx, view_name in enumerate(view_angles.keys()):
-                with tabs[idx]:
-                    html_wrapper = f"""
-                    <div style="text-align: center; background-color: #ffffff; border: 2px solid #e6e6e6; padding: 15px; border-radius: 8px;">
-                        {svg_contents[view_name]}
-                    </div>
-                    """
-                    st.markdown(html_wrapper, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            with open(filepath, "rb") as file:
-                st.download_button(
-                    label="⬇️ Download 3D STEP File",
-                    data=file,
-                    file_name=filename,
-                    mime="application/octet-stream",
-                    use_container_width=True
-                )
-
-        except ValueError as ve:
-            status_text.empty()
-            st.error(str(ve))
-        except Exception as e:
-            status_text.empty()
-            st.error(f"An unexpected error occurred during geometric modeling:\n{e}")
+            tabs = st.tabs(list(view_angles.k
