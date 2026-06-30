@@ -7,7 +7,54 @@ import google.generativeai as genai
 
 st.set_page_config(layout="wide", page_title="Solid Tube Generator")
 st.title("Lightning Fast Solid Tube Generator")
-st.markdown("Generates a highly complex, 3D multi-body B-Rep solid model of a ribbed intake tube with live web rendering.")
+st.markdown("Generates a highly complex, 3D multi-body B-Rep solid model of a ribbed intake tube.")
+
+# ==========================================
+# 🤖 AI ASSISTANT (SIDEBAR)
+# ==========================================
+st.sidebar.title("🤖 CAD AI Assistant")
+st.sidebar.markdown("Ask me to analyze your current tube parameters!")
+
+api_key = None
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+elif "GEMINI_API_KEY" in os.environ:
+    api_key = os.environ["GEMINI_API_KEY"]
+
+if api_key:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        with st.sidebar.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.sidebar.chat_input("Ask about your CAD model..."):
+        st.sidebar.chat_message("user").markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        # Inject live UI data into the AI's context
+        context = f"""
+        You are an expert Mechanical CAD assistant helping a user design a ribbed intake tube. 
+        Here is the live data currently entered on the user's screen:
+        The user is asking: {prompt}
+        """
+        
+        with st.sidebar.spinner("Thinking..."):
+            try:
+                response = model.generate_content(context)
+                ai_reply = response.text
+                
+                st.sidebar.chat_message("assistant").markdown(ai_reply)
+                st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+            except Exception as e:
+                st.sidebar.error(f"AI Connection Error: {e}")
+else:
+    st.sidebar.warning("⚠️ **API Key Missing**\n\nTo activate the AI, go to your Streamlit Cloud App Settings > Secrets, and add:\n`GEMINI_API_KEY = \"your_actual_key_here\"`")
+
 
 # ==========================================
 # UI: USER INPUTS FOR POINTS AND DIAMETERS
@@ -36,65 +83,15 @@ cols[4].markdown("**Outer Dia (mm)**")
 for i, (dx, dy, dz, ddia) in enumerate(default_data):
     cols = st.columns([1, 2, 2, 2, 2])
     cols[0].markdown(f"**P{i+1}**")
+    
     x = cols[1].number_input(f"X{i+1}", value=dx, format="%.3f", key=f"x{i}", label_visibility="collapsed")
     y = cols[2].number_input(f"Y{i+1}", value=dy, format="%.3f", key=f"y{i}", label_visibility="collapsed")
     z = cols[3].number_input(f"Z{i+1}", value=dz, format="%.3f", key=f"z{i}", label_visibility="collapsed")
     dia = cols[4].number_input(f"Dia{i+1}", value=ddia, format="%.3f", key=f"d{i}", label_visibility="collapsed")
+    
     user_data.append(((x, y, z), dia / 2.0))
 
 st.markdown("---")
-
-# ==========================================
-# 🤖 AI ASSISTANT (SIDEBAR)
-# ==========================================
-st.sidebar.title("🤖 CAD AI Assistant")
-st.sidebar.markdown("Ask me to analyze your current tube parameters!")
-
-# Securely fetch API key from Streamlit Secrets or Environment Variables
-api_key = None
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-elif "GEMINI_API_KEY" in os.environ:
-    api_key = os.environ["GEMINI_API_KEY"]
-
-if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.5-flash')
-
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Display previous chat messages
-    for message in st.session_state.messages:
-        with st.sidebar.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # AI Chat Input
-    if prompt := st.sidebar.chat_input("Ask about your CAD model..."):
-        st.sidebar.chat_message("user").markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        # Inject live UI data into the AI's context
-        context = f"""
-        You are an expert Mechanical CAD assistant helping a user design a ribbed intake tube. 
-        Here is the live data currently entered on the user's screen:
-        Current Points (X, Y, Z) and corresponding Radii: {user_data}
-        
-        The user is asking: {prompt}
-        """
-        
-        with st.sidebar.spinner("Thinking..."):
-            try:
-                response = model.generate_content(context)
-                ai_reply = response.text
-                
-                st.sidebar.chat_message("assistant").markdown(ai_reply)
-                st.session_state.messages.append({"role": "assistant", "content": ai_reply})
-            except Exception as e:
-                st.sidebar.error(f"AI Connection Error: {e}")
-else:
-    st.sidebar.warning("⚠️ **API Key Missing**\n\nTo activate the AI, go to your Streamlit Cloud App Settings > Secrets, and add:\n`GEMINI_API_KEY = \"your_actual_key_here\"`")
 
 # ==========================================
 # CAD GENERATION LOGIC
@@ -104,7 +101,7 @@ if st.button("Generate Intake Tube Model"):
     
     with st.spinner("Compiling CAD geometry and generating web renders... Please wait."):
         try:
-            status_text.info("Mapping 3D spline trajectory...")
+            status_text.info("--- LIGHTNING FAST SOLID TUBE GENERATOR (FINAL) ---")
             start_time = time.time()
             
             data = user_data
@@ -116,6 +113,7 @@ if st.button("Generate Intake Tube Model"):
             rib_w = 2.5
             rib_fillet = 1.24
             
+            status_text.info("Mapping 3D spline trajectory...")
             path = cq.Workplane("XY").spline(pts)
             wire = path.wire().val()
             exact_length = wire.Length()
@@ -138,6 +136,7 @@ if st.button("Generate Intake Tube Model"):
                 p2 = cq.Vector(pts[i+1])
                 v1 = p1 - p0
                 v2 = p2 - p1
+
                 try:
                     angle = v1.getAngle(v2) * (180.0 / math.pi)
                 except:
@@ -159,6 +158,8 @@ if st.button("Generate Intake Tube Model"):
                 for idx, sp in enumerate(suggested_pts):
                     st.write(f"Point {idx+1}: {sp}")
                 raise ValueError("Sharp geometry detected. Please apply the suggested coordinates above and re-run.")
+                
+            status_text.info("✅  Geometry check passed! Profile is smooth.")
             
             def get_smooth_radius(t):
                 for i in range(len(t_control)-1):
@@ -247,6 +248,7 @@ if st.button("Generate Intake Tube Model"):
             p7_pos = wire.positionAt(1.0)
             p7_tangent = wire.tangentAt(1.0)
             x_dir_p7 = p7_tangent.cross(global_up)
+            
             if x_dir_p7.Length < 0.001: x_dir_p7 = p7_tangent.cross(cq.Vector(0, 1, 0))
             plane_p7 = cq.Plane(origin=p7_pos, xDir=x_dir_p7, normal=p7_tangent)
             
@@ -257,9 +259,19 @@ if st.button("Generate Intake Tube Model"):
             cyl_length = 12.0
             
             plane_fillet_start = cq.Plane(origin=p7_pos + (p7_tangent * -2.0), xDir=x_dir_p7, normal=p7_tangent)
-            flange_fillet = (cq.Workplane(plane_fillet_start).circle((p7_dia / 2.0) - 0.1).workplane(offset=2.0).circle(cyl_outer_r).loft(combine=False).val())
+            flange_fillet = (cq.Workplane(plane_fillet_start)
+                .circle((p7_dia / 2.0) - 0.1)
+                .workplane(offset=2.0)
+                .circle(cyl_outer_r)
+                .loft(combine=False)
+                .val())
+                
             plane_cyl_start = cq.Plane(origin=p7_pos + (p7_tangent * -0.5), xDir=x_dir_p7, normal=p7_tangent)
-            throttle_cyl = (cq.Workplane(plane_cyl_start).circle(cyl_outer_r).circle(cyl_inner_r).extrude(cyl_length + 0.5).val())
+            throttle_cyl = (cq.Workplane(plane_cyl_start)
+                .circle(cyl_outer_r)
+                .circle(cyl_inner_r)
+                .extrude(cyl_length + 0.5)
+                .val())
                 
             t_rib_rad = 0.5
             p7_end_pos = p7_pos + (p7_tangent * cyl_length)
@@ -272,6 +284,7 @@ if st.button("Generate Intake Tube Model"):
             p3_pos = wire.positionAt(p3_t)
             p3_tangent = wire.tangentAt(p3_t)
             x_dir_p3 = p3_tangent.cross(global_up)
+            
             if x_dir_p3.Length < 0.001: x_dir_p3 = p3_tangent.cross(cq.Vector(0, 1, 0))
             plane_p3 = cq.Plane(origin=p3_pos, xDir=x_dir_p3, normal=p3_tangent)
             p3_rad = radii[p3_idx]
@@ -282,19 +295,39 @@ if st.button("Generate Intake Tube Model"):
             mount_thick = 3.5
             mount_gap = 3.0
             
-            mount_c1 = cq.Workplane(plane_p3).circle(c1_r).circle(p3_rad - 1.0).extrude(mount_thick).val()
+            mount_c1 = (cq.Workplane(plane_p3)
+                .circle(c1_r).circle(p3_rad - 1.0)
+                .extrude(mount_thick).val())
+                
             plane_c1_fillet = cq.Plane(origin=p3_pos + (p3_tangent * -2.0), xDir=x_dir_p3, normal=p3_tangent)
-            mount_c1_fillet = cq.Workplane(plane_c1_fillet).circle(p3_rad - 1.0).workplane(offset=2.0).circle(c1_r).loft(combine=False).val()
+            mount_c1_fillet = (cq.Workplane(plane_c1_fillet)
+                .circle(p3_rad - 1.0)
+                .workplane(offset=2.0)
+                .circle(c1_r)
+                .loft(combine=False).val())
                 
             plane_gap = cq.Plane(origin=p3_pos + (p3_tangent * mount_thick), xDir=x_dir_p3, normal=p3_tangent)
-            gap_rib_remover = cq.Workplane(plane_gap).circle(p3_rad + rib_h + 5.0).circle(p3_rad).extrude(mount_gap).val()
+            gap_rib_remover = (cq.Workplane(plane_gap)
+                .circle(p3_rad + rib_h + 5.0) 
+                .circle(p3_rad)               
+                .extrude(mount_gap).val())
                 
             c2_offset = mount_thick + mount_gap
             plane_c2 = cq.Plane(origin=p3_pos + (p3_tangent * c2_offset), xDir=x_dir_p3, normal=p3_tangent)
-            mount_c2 = cq.Workplane(plane_c2).circle(c2_r).circle(p3_rad - 1.0).extrude(mount_thick).val()
-            plane_c2_fillet = cq.Plane(origin=p3_pos + (p3_tangent * (c2_offset + mount_thick)), xDir=x_dir_p3, normal=p3_tangent)
-            mount_c2_fillet = cq.Workplane(plane_c2_fillet).circle(c2_r).workplane(offset=2.0).circle(p3_rad - 1.0).loft(combine=False).val()
+            mount_c2 = (cq.Workplane(plane_c2)
+                .circle(c2_r).circle(p3_rad - 1.0)
+                .extrude(mount_thick).val())
                 
+            plane_c2_fillet = cq.Plane(origin=p3_pos + (p3_tangent * (c2_offset + mount_thick)), xDir=x_dir_p3, normal=p3_tangent)
+            mount_c2_fillet = (cq.Workplane(plane_c2_fillet)
+                .circle(c2_r)
+                .workplane(offset=2.0)
+                .circle(p3_rad - 1.0)
+                .loft(combine=False).val())
+                
+            # ==========================================
+            # 8. BOOLEAN FUSION
+            # ==========================================
             status_text.info("Fusing all bodies into a single water-tight Solid (Please wait ~12s)...")
             all_rings = cq.Compound.makeCompound(ring_list)
             
@@ -314,6 +347,9 @@ if st.button("Generate Intake Tube Model"):
                 
             final_solid_tube = main_body.cut(cq.Workplane().add(solid_inner))
             
+            # ==========================================
+            # 9. RENDER 2D SVG PROJECTIONS ON WEBPAGE
+            # ==========================================
             status_text.info("Rendering 2D engineering views for the web page... (Takes a few seconds)")
             
             view_angles = {
@@ -341,6 +377,9 @@ if st.button("Generate Intake Tube Model"):
                 cq.exporters.export(final_solid_tube, svg_path, exportType='SVG', opt=opt)
                 svg_paths[view_name] = svg_path
 
+            # ==========================================
+            # 10. EXPORT ASSEMBLY WITH REFERENCES
+            # ==========================================
             status_text.info("Packaging Solid Body and Wireframes into STEP format...")
             assy = cq.Assembly()
             assy.add(final_solid_tube, name="Final_Solid_Tube", color=cq.Color("orange"))
@@ -350,12 +389,15 @@ if st.button("Generate Intake Tube Model"):
                 p_coord = pts[i]
                 r = radii[i]
                 t = t_control[i]
+
                 tangent = wire.tangentAt(t)
                 x_dir = tangent.cross(global_up)
                 if x_dir.Length < 0.001: x_dir = tangent.cross(cq.Vector(0, 1, 0))
                 plane = cq.Plane(origin=cq.Vector(p_coord), xDir=x_dir, normal=tangent)
+
                 pt_vertex = cq.Vertex.makeVertex(*p_coord)
                 assy.add(pt_vertex, name=f"Ref_Point_{i+1}", color=cq.Color("black"))
+
                 ref_circle = cq.Workplane(plane).circle(r).wire().val()
                 assy.add(ref_circle, name=f"Ref_Circle_{i+1}", color=cq.Color("green"))
                 
@@ -367,6 +409,7 @@ if st.button("Generate Intake Tube Model"):
             status_text.empty() 
             st.success(f"✅ SUCCESS! Solid Part and Web Renders generated in {round(end_time - start_time, 1)} seconds.")
             
+            # --- DISPLAY RENDERS DIRECTLY ON THE WEBPAGE ---
             st.markdown("### Interactive Engineering Views")
             tabs = st.tabs(list(view_angles.keys()))
             for idx, view_name in enumerate(view_angles.keys()):
@@ -377,7 +420,7 @@ if st.button("Generate Intake Tube Model"):
             
             with open(filepath, "rb") as file:
                 st.download_button(
-                    label="⬇️ Download 3D STEP File",
+                    label="⬇️ Download STEP File",
                     data=file,
                     file_name=filename,
                     mime="application/octet-stream",
