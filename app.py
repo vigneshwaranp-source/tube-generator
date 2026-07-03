@@ -6,10 +6,34 @@ import os
 import json
 import re
 import google.generativeai as genai
+from github import Github
 
 st.set_page_config(layout="wide", page_title="Solid Tube Generator")
 st.title("Lightning Fast Solid Tube Generator")
 st.markdown("Generates a highly complex, 3D multi-body B-Rep solid model of a ribbed intake tube with an Autonomous AI Feedback Loop.")
+
+# ==========================================
+# 🚀 GITHUB AUTO-UPDATER FUNCTION
+# ==========================================
+def update_app_py(new_python_code):
+    try:
+        g = Github(st.secrets["GITHUB_TOKEN"])
+        
+        # ⚠️ CHANGE THIS TO YOUR ACTUAL GITHUB USERNAME AND REPO NAME!
+        repo = g.get_repo("YourGitHubUsername/tube-generator") 
+        
+        contents = repo.get_contents("app.py", ref="main")
+        
+        repo.update_file(
+            contents.path, 
+            "AI Auto-Update: Modifying source code", 
+            new_python_code, 
+            contents.sha, 
+            branch="main"
+        )
+        st.success("✅ The AI has successfully rewritten the source code on GitHub! Streamlit is rebooting now...")
+    except Exception as e:
+        st.error(f"Failed to push code to GitHub: {e}")
 
 # ==========================================
 # UI: STATE MANAGEMENT
@@ -38,11 +62,11 @@ if api_key:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.5-flash')
 else:
-    st.sidebar.warning("⚠️ **API Key Missing**\n\nTo activate the AI, go to your Streamlit Cloud App Settings > Secrets, and add:\n`GEMINI_API_KEY = \"your_actual_key_here\"`")
+    st.sidebar.warning("⚠️ **API Key Missing**")
     model = None
 
 st.sidebar.title("🤖 CAD AI Assistant")
-st.sidebar.markdown("Ask me to analyze parameters, or command me to change the tube!")
+st.sidebar.markdown("Ask me to analyze parameters, or command me to rewrite the app!")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -63,13 +87,9 @@ if prompt := st.sidebar.chat_input("Ask about your CAD model..."):
         
         RULES:
         1. If the user asks a general question, just reply normally.
-        2. If the user asks you to modify the tube, YOU MUST output the full updated list of all 7 points inside a JSON code block like this:
-        ```json
-        [
-          [x1, y1, z1, dia1], ...
-        ]
-        ```
-        Always include the JSON block if a change is requested, followed by a brief explanation.
+        2. If the user asks to modify the tube dimensions, output ONLY the 7 points in a JSON block (```json).
+        3. IF AND ONLY IF the user explicitly commands you to "rewrite the code", "add a feature to the app", or "update app.py", YOU MUST output the ENTIRE, fully functional Python script inside a python code block (```python). 
+        
         User prompt: {prompt}
         """
         
@@ -78,6 +98,15 @@ if prompt := st.sidebar.chat_input("Ask about your CAD model..."):
                 response = model.generate_content(context)
                 ai_reply = response.text
                 
+                # Check if the AI wrote a new Python script
+                python_match = re.search(r'```python\n(.*?)\n```', ai_reply, re.DOTALL)
+                if python_match:
+                    new_code = python_match.group(1).strip()
+                    st.sidebar.warning("⚠️ Pushing new code to GitHub...")
+                    update_app_py(new_code)
+                    st.stop() # Stop the current run to let Streamlit reboot
+
+                # Check if the AI just updated parameters
                 json_match = re.search(r'```json\n(.*?)\n```', ai_reply, re.DOTALL)
                 if json_match:
                     try:
@@ -90,7 +119,7 @@ if prompt := st.sidebar.chat_input("Ask about your CAD model..."):
                     except Exception:
                         st.sidebar.error("Failed to apply AI changes.")
                 
-                clean_reply = re.sub(r'```json\n(.*?)\n```', '', ai_reply, flags=re.DOTALL).strip()
+                clean_reply = re.sub(r'```(json|python)\n.*?\n```', '', ai_reply, flags=re.DOTALL).strip()
                 if clean_reply:
                     st.sidebar.chat_message("assistant").markdown(clean_reply)
                     st.session_state.messages.append({"role": "assistant", "content": clean_reply})
@@ -186,7 +215,6 @@ if st.button("Generate Intake Tube Model"):
                     plane = cq.Plane(origin=pos, xDir=x_dir, normal=tangent)
                     R = get_smooth_radius(t)
 
-                    # Simplified sketch without fillets
                     sketch = (cq.Sketch()
                         .circle(R)
                         .rect(R*2 + (rib_h*2), rib_w)
@@ -223,7 +251,6 @@ if st.button("Generate Intake Tube Model"):
                     normal_rev = tangent.cross(x_dir_radial)
                     plane_rev = cq.Plane(origin=pos, xDir=tangent, normal=normal_rev)
 
-                    # Simplified sharp trapezoidal profile for the rings
                     ring_prof = (cq.Workplane(plane_rev)
                         .moveTo(-1.25, R + 2.5)
                         .lineTo( 1.25, R + 2.5)
@@ -248,19 +275,9 @@ if st.button("Generate Intake Tube Model"):
                 cyl_length = 12.0
                 
                 plane_fillet_start = cq.Plane(origin=p7_pos + (p7_tangent * -2.0), xDir=x_dir_p7, normal=p7_tangent)
-                flange_fillet = (cq.Workplane(plane_fillet_start)
-                    .circle((p7_dia / 2.0) - 0.1)
-                    .workplane(offset=2.0)
-                    .circle(cyl_outer_r)
-                    .loft(combine=False)
-                    .val())
-                    
+                flange_fillet = (cq.Workplane(plane_fillet_start).circle((p7_dia / 2.0) - 0.1).workplane(offset=2.0).circle(cyl_outer_r).loft(combine=False).val())
                 plane_cyl_start = cq.Plane(origin=p7_pos + (p7_tangent * -0.5), xDir=x_dir_p7, normal=p7_tangent)
-                throttle_cyl = (cq.Workplane(plane_cyl_start)
-                    .circle(cyl_outer_r)
-                    .circle(cyl_inner_r)
-                    .extrude(cyl_length + 0.5)
-                    .val())
+                throttle_cyl = (cq.Workplane(plane_cyl_start).circle(cyl_outer_r).circle(cyl_inner_r).extrude(cyl_length + 0.5).val())
                     
                 t_rib_rad = 0.5
                 p7_end_pos = p7_pos + (p7_tangent * cyl_length)
@@ -315,7 +332,11 @@ if st.button("Generate Intake Tube Model"):
                     
                 final_solid_tube = main_body.cut(cq.Workplane().add(solid_inner))
                 
-                # --- RENDER 2D SVG ---
+                # ==========================================
+                # 9. RENDER 2D SVG PROJECTIONS ON WEBPAGE (FIXED SVG DIMENSIONS)
+                # ==========================================
+                status_text.info("Rendering 2D engineering views for the web page...")
+                
                 view_angles = {
                     "Isometric": (1, -1, 1),
                     "Front": (0, -1, 0),
@@ -328,14 +349,29 @@ if st.button("Generate Intake Tube Model"):
                 for view_name, proj_dir in view_angles.items():
                     svg_path = os.path.join(os.getcwd(), f"{view_name}.svg")
                     opt = {
-                        "width": 800, "height": 600, "marginLeft": 10, "marginTop": 10,
-                        "showAxes": False, "projectionDir": proj_dir, "strokeWidth": 0.8,
-                        "strokeColor": (0, 0, 0), "showHidden": False
+                        "width": 800, 
+                        "height": 600, 
+                        "marginLeft": 10, 
+                        "marginTop": 10,
+                        "showAxes": False, 
+                        "projectionDir": proj_dir, 
+                        "strokeWidth": 1.0, 
+                        "strokeColor": (0, 0, 0), 
+                        "showHidden": False
                     }
+                    
                     cq.exporters.export(final_solid_tube.val(), svg_path, exportType='SVG', opt=opt)
+                    
                     with open(svg_path, "r") as f:
-                        svg_contents[view_name] = f.read()
-                    os.remove(svg_path) 
+                        raw_svg = f.read()
+                        # Make SVG responsive
+                        responsive_svg = raw_svg.replace(
+                            '<svg width="800" height="600"', 
+                            '<svg style="width: 100%; height: auto;" viewBox="0 0 800 600"'
+                        )
+                        svg_contents[view_name] = responsive_svg
+                        
+                    os.remove(svg_path)
 
                 # --- EXPORT STEP ---
                 assy = cq.Assembly()
