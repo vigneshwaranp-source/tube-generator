@@ -60,7 +60,7 @@ elif "GEMINI_API_KEY" in os.environ:
 
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.5-pro')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 else:
     st.sidebar.warning("⚠️ **API Key Missing**")
     model = None
