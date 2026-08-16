@@ -3,7 +3,7 @@ import streamlit as st
 st.set_page_config(page_title="CATIA Variable Tube Generator", page_icon="🚀", layout="wide")
 
 st.title("🚀 CATIA V5: Variable Diameter Tube Generator")
-st.write("This macro builds a Multi-Section loft using 7 varying circles, 4 guide curves, and merges all ribs into a solid part.")
+st.write("This macro builds a smooth Multi-Section loft using 7 varying circles and merges all ribs into a solid part without over-constraining the solver.")
 
 # --- 1. USER INTERFACE ---
 st.header("1. Global Tube Parameters")
@@ -83,7 +83,7 @@ vbscript_code += f"""
     Set splineRef = part1.CreateReferenceFromObject(spline)
 
     ' ==========================================
-    ' 2. CREATE PLANES, CIRCLES & 4 POINTS EACH
+    ' 2. CREATE PLANES, CIRCLES & 4 QUADRANT POINTS
     ' ==========================================
 """
 
@@ -99,7 +99,7 @@ for i, (p_id, px, py, pz, pr) in enumerate(points, start=1):
     geomSet.AppendHybridShape circle{i}
     Dim refCircle{i} : Set refCircle{i} = part1.CreateReferenceFromObject(circle{i})
 
-    ' Generate 4 points on the circle (0, 90, 180, 270 degrees via distance)
+    ' Generate 4 points on the circle to act as wire paths
     Dim pt_c1_{i}, pt_c2_{i}, pt_c3_{i}, pt_c4_{i}
     
     Set pt_c1_{i} = hsf.AddNewPointOnCurveFromDistance(refCircle{i}, 0.0, False)
@@ -121,7 +121,7 @@ for i, (p_id, px, py, pz, pr) in enumerate(points, start=1):
 
 vbscript_code += f"""
     ' ==========================================
-    ' 3. CREATE 4 GUIDE CURVES (SPLINES)
+    ' 3. CREATE 4 WIRE PATHS (SPLINES)
     ' ==========================================
 """
 
@@ -146,11 +146,9 @@ vbscript_code += f"""
     mainLoft.SectionCoupling = 1 ' Ratio coupling
 """
 
+# Only add the circles and closing points. We omit the guide curves to prevent over-constraining the solver!
 for i in range(1, 8):
     vbscript_code += f"    mainLoft.AddSectionToLoft refCircle{i}, 1, ref_pt_c1_{i}\n"
-
-for g in range(1, 5):
-    vbscript_code += f"    mainLoft.AddGuide refGuide{g}\n"
 
 vbscript_code += f"""    mainLoft.SetSpine splineRef
     mainLoft.Name = "Main_Tube_Loft"
@@ -158,9 +156,12 @@ vbscript_code += f"""    mainLoft.SetSpine splineRef
     
     Dim sweepRef
     Set sweepRef = part1.CreateReferenceFromObject(mainLoft)
+    
+    ' Force CATIA to compute the loft safely before moving on
+    part1.Update()
 
     ' ==========================================
-    ' 5. VERTICAL RIBS (Swept along Guides)
+    ' 5. VERTICAL RIBS (Swept along Wire Paths)
     ' ==========================================
     Dim sweepRight, sweepLeft, sweepUp, sweepDown
     
