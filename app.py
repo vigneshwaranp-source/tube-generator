@@ -3,7 +3,7 @@ import streamlit as st
 st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ CATIA V5: Ribbed Tube Macro Generator")
-st.write("Enter your parameters below to generate a custom `.catvbs` macro file. The macro will automatically assemble all ribs into the main PartBody.")
+st.write("Enter your parameters below to generate a custom `.catvbs` macro file. The macro will automatically ADD all ribs into the main PartBody.")
 
 # --- 1. USER INTERFACE ---
 st.header("1. Tube Parameters")
@@ -19,14 +19,12 @@ with col2:
 st.header("2. Spline Coordinates & Point IDs (7 Points)")
 points = []
 for i in range(1, 8):
-    # Changed to 4 columns, giving the ID column a bit more width
     cols = st.columns([1.5, 1, 1, 1]) 
     default_x = [0.0, 0.0, 150.0, 300.0, 300.0, 150.0, 0.0]
     default_y = [0.0, 0.0, 0.0, 150.0, 300.0, 450.0, 450.0]
     default_z = [0.0, 200.0, 300.0, 300.0, 450.0, 600.0, 800.0]
     
     with cols[0]:
-        # Added a text input for the Point ID
         pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"id{i}")
     with cols[1]:
         x = st.number_input(f"P{i} X", value=default_x[i-1], key=f"x{i}")
@@ -35,7 +33,6 @@ for i in range(1, 8):
     with cols[3]:
         z = st.number_input(f"P{i} Z", value=default_z[i-1], key=f"z{i}")
     
-    # Store the ID along with the coordinates
     points.append((pt_id, x, y, z))
 
 # --- 2. VBSCRIPT GENERATION LOGIC ---
@@ -65,7 +62,6 @@ vbscript_code = f"""Sub CATMain()
     ' --- Points ---
 """
 
-# Extract the ID (p_id) and inject it into the Point Name
 for i, (p_id, px, py, pz) in enumerate(points, start=1):
     vbscript_code += f"""    Dim pt{i}
     Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz})
@@ -202,17 +198,21 @@ vbscript_code += f"""
         End If
     Next
 
-    ' --- Boolean Assembly ---
-    ' Switch active object back to MainBody
+    ' Force update before Boolean Operations
+    part1.Update()
+
+    ' --- Boolean ADD (More robust than Assemble) ---
     part1.InWorkObject = part1.MainBody
     
-    ' Assemble Vertical Ribs into MainBody
-    Dim assembleVert
-    Set assembleVert = shapeFactory.AddNewAssemble(body1)
+    ' Add Vertical Ribs into MainBody
+    Dim addVert
+    Set addVert = shapeFactory.AddNewAdd(body1)
+    part1.UpdateObject addVert ' Update sequentially
     
-    ' Assemble Circular Ribs into MainBody
-    Dim assembleCirc
-    Set assembleCirc = shapeFactory.AddNewAssemble(body2)
+    ' Add Circular Ribs into MainBody
+    Dim addCirc
+    Set addCirc = shapeFactory.AddNewAdd(body2)
+    part1.UpdateObject addCirc ' Update sequentially
 
     part1.Update()
 End Sub
@@ -223,6 +223,6 @@ st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
     data=vbscript_code,
-    file_name="MakeTube_Assembled.catvbs",
+    file_name="MakeTube_Added.catvbs",
     mime="text/plain"
 )
