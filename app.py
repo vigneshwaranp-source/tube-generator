@@ -16,21 +16,27 @@ with col2:
     circ_rib_radius = st.number_input("Circular Rib Radius (mm)", value=1.5, step=0.5)
     circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=20.0, step=5.0)
 
-st.header("2. Spline Coordinates (7 Points)")
+st.header("2. Spline Coordinates & Point IDs (7 Points)")
 points = []
 for i in range(1, 8):
-    cols = st.columns(3)
+    # Changed to 4 columns, giving the ID column a bit more width
+    cols = st.columns([1.5, 1, 1, 1]) 
     default_x = [0.0, 0.0, 150.0, 300.0, 300.0, 150.0, 0.0]
     default_y = [0.0, 0.0, 0.0, 150.0, 300.0, 450.0, 450.0]
     default_z = [0.0, 200.0, 300.0, 300.0, 450.0, 600.0, 800.0]
     
     with cols[0]:
-        x = st.number_input(f"P{i} X", value=default_x[i-1], key=f"x{i}")
+        # Added a text input for the Point ID
+        pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"id{i}")
     with cols[1]:
-        y = st.number_input(f"P{i} Y", value=default_y[i-1], key=f"y{i}")
+        x = st.number_input(f"P{i} X", value=default_x[i-1], key=f"x{i}")
     with cols[2]:
+        y = st.number_input(f"P{i} Y", value=default_y[i-1], key=f"y{i}")
+    with cols[3]:
         z = st.number_input(f"P{i} Z", value=default_z[i-1], key=f"z{i}")
-    points.append((x, y, z))
+    
+    # Store the ID along with the coordinates
+    points.append((pt_id, x, y, z))
 
 # --- 2. VBSCRIPT GENERATION LOGIC ---
 vbscript_code = f"""Sub CATMain()
@@ -59,10 +65,11 @@ vbscript_code = f"""Sub CATMain()
     ' --- Points ---
 """
 
-for i, (px, py, pz) in enumerate(points, start=1):
+# Extract the ID (p_id) and inject it into the Point Name
+for i, (p_id, px, py, pz) in enumerate(points, start=1):
     vbscript_code += f"""    Dim pt{i}
     Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz})
-    pt{i}.Name = "Point_{i}"
+    pt{i}.Name = "{p_id}"
     geomSet.AppendHybridShape pt{i}
     Dim ref{i}
     Set ref{i} = part1.CreateReferenceFromObject(pt{i})
