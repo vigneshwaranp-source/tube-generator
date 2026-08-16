@@ -1,4 +1,1 @@
 streamlit
-cadquery
-google-generativeai
-PyGithub
