@@ -1,9 +1,9 @@
 import streamlit as st
 
-st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️")
+st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ CATIA V5: Ribbed Tube Macro Generator")
-st.write("Enter your parameters below to generate a custom `.catvbs` macro file.")
+st.write("Enter your parameters below to generate a custom `.catvbs` macro file. The macro will automatically assemble all ribs into the main PartBody.")
 
 # --- 1. USER INTERFACE ---
 st.header("1. Tube Parameters")
@@ -165,10 +165,12 @@ vbscript_code += f"""
     Dim shapeFactory
     Set shapeFactory = part1.ShapeFactory
     
+    ' 1. Hollow Main Tube
     part1.InWorkObject = part1.MainBody
     Dim thickMain
     Set thickMain = shapeFactory.AddNewThickSurface(sweepRef, 1, {main_thickness}, 0.0)
     
+    ' 2. Vertical Ribs Solid Body
     Dim body1
     Set body1 = part1.Bodies.Add()
     body1.Name = "Body.1_Vertical_Ribs"
@@ -179,6 +181,7 @@ vbscript_code += f"""
     shapeFactory.AddNewCloseSurface(part1.CreateReferenceFromObject(sweepUp))
     shapeFactory.AddNewCloseSurface(part1.CreateReferenceFromObject(sweepDown))
     
+    ' 3. Circular Ribs Solid Body
     Dim body2
     Set body2 = part1.Bodies.Add()
     body2.Name = "Body.2_Circular_Ribs"
@@ -192,6 +195,18 @@ vbscript_code += f"""
         End If
     Next
 
+    ' --- Boolean Assembly ---
+    ' Switch active object back to MainBody
+    part1.InWorkObject = part1.MainBody
+    
+    ' Assemble Vertical Ribs into MainBody
+    Dim assembleVert
+    Set assembleVert = shapeFactory.AddNewAssemble(body1)
+    
+    ' Assemble Circular Ribs into MainBody
+    Dim assembleCirc
+    Set assembleCirc = shapeFactory.AddNewAssemble(body2)
+
     part1.Update()
 End Sub
 """
@@ -201,6 +216,6 @@ st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
     data=vbscript_code,
-    file_name="MakeTube.catvbs",
+    file_name="MakeTube_Assembled.catvbs",
     mime="text/plain"
 )
