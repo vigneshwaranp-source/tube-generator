@@ -16,19 +16,21 @@ with col2:
     circ_rib_dia = st.number_input("Circular Rib Diameter (mm)", value=4.0, step=0.2) 
     circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=30.0, step=5.0)
 
-st.header("2. Spline Coordinates & Main Tube Diameters (7 Points)")
+# Add a slider to dynamically choose between 3 and 10 points
+st.header("2. Spline Coordinates & Main Tube Diameters")
+num_points = st.slider("Select Number of Spline Points (Minimum 3, Maximum 10)", min_value=3, max_value=10, value=7)
+
 st.write("Default coordinates represent a realistic, gentle 3D automotive hose bend.")
 points = []
-for i in range(1, 8):
+
+# Expanded default arrays to support up to 10 points
+default_x = [0.0, 0.0, 30.0, 100.0, 250.0, 400.0, 550.0, 700.0, 850.0, 1000.0]
+default_y = [0.0, 0.0, 0.0, 50.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+default_z = [0.0, 150.0, 300.0, 420.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
+default_d = [31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 37.0, 37.0, 37.0]
+
+for i in range(1, num_points + 1):
     cols = st.columns([1.5, 1, 1, 1, 1]) 
-    
-    # Updated to the Successful "Gentle Bend" Realistic Coordinates
-    default_x = [0.0, 0.0, 30.0, 100.0, 250.0, 400.0, 550.0]
-    default_y = [0.0, 0.0, 0.0, 50.0, 100.0, 100.0, 100.0]
-    default_z = [0.0, 150.0, 300.0, 420.0, 500.0, 500.0, 500.0]
-    
-    # Default Profile DIAMETERS
-    default_d = [31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0]
     
     with cols[0]:
         pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"clean_id_{i}")
@@ -83,7 +85,7 @@ vbscript_code = """Sub CATMain()
     Dim spline: Set spline = hsf.AddNewSpline(): spline.SetSplineType 0: spline.SetClosing 0
 """
 
-# Dynamically generate points
+# Dynamically generate points based on user selection
 for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
     vbscript_code += f"""
     Dim pt{i}: Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz}): pt{i}.Name = "{p_id}": geomSet.AppendHybridShape pt{i}
@@ -120,7 +122,8 @@ vbscript_code += f"""
     mainLoft.SectionCoupling = 1
 """
 
-for i in range(1, 8):
+# Dynamically link the exact number of selected sections to the loft
+for i in range(1, len(points) + 1):
     vbscript_code += f"    mainLoft.AddSectionToLoft refCircle{i}, 1, refClosePt{i}\n"
 
 vbscript_code += f"""
@@ -295,6 +298,6 @@ st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
     data=vbscript_code,
-    file_name="Master_Ribbed_Tube_Realistic_Hidden.catvbs",
+    file_name="Master_Ribbed_Tube_Dynamic.catvbs",
     mime="text/plain"
 )
