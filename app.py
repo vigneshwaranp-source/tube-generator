@@ -2,28 +2,33 @@ import streamlit as st
 
 st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
 
-st.title("⚙️ CATIA V5: Freeflow Loft & Solid Rib Generator")
-st.write("Enter DIAMETERS below. The app will automatically calculate the true CATIA radii and generate the macro.")
+st.title("⚙️ CATIA V5: Realistic Ribbed Hose Generator")
+st.write("Enter DIAMETERS below. The app converts them to radii, applies domain filters, and generates a robust CATIA macro.")
 
 # --- 1. USER INTERFACE ---
 st.header("1. Tube Parameters")
 col1, col2 = st.columns(2)
 with col1:
     main_thickness = st.number_input("Main Tube Thickness (mm)", value=3.5, step=0.5)
+    # Hinting to the user to keep vertical slightly smaller than circular for Boolean success
     vert_rib_dia = st.number_input("Vertical Wire Diameter (mm)", value=3.8, step=0.2) 
 with col2:
     circ_rib_dia = st.number_input("Circular Rib Diameter (mm)", value=4.0, step=0.2) 
     circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=30.0, step=5.0)
 
 st.header("2. Spline Coordinates & Main Tube Diameters (7 Points)")
+st.write("Default coordinates represent a realistic, gentle 3D automotive hose bend.")
 points = []
 for i in range(1, 8):
     cols = st.columns([1.5, 1, 1, 1, 1]) 
-    default_x = [0.0, 150.0, 300.0, 150.0, -100.0, -200.0, 0.0]
-    default_y = [0.0, 150.0, -50.0, -250.0, -100.0, 150.0, 300.0]
-    default_z = [0.0, 150.0, 300.0, 450.0, 600.0, 750.0, 900.0]
+    
+    # Updated to the Successful "Gentle Bend" Realistic Coordinates
+    default_x = [0.0, 0.0, 30.0, 100.0, 250.0, 400.0, 550.0]
+    default_y = [0.0, 0.0, 0.0, 50.0, 100.0, 100.0, 100.0]
+    default_z = [0.0, 150.0, 300.0, 420.0, 500.0, 500.0, 500.0]
+    
     # Default Profile DIAMETERS
-    default_d = [50.0, 100.0, 40.0, 120.0, 60.0, 110.0, 50.0]
+    default_d = [31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0]
     
     with cols[0]:
         pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"clean_id_{i}")
@@ -124,7 +129,7 @@ vbscript_code += f"""
     Dim sweepRef: Set sweepRef = part1.CreateReferenceFromObject(mainLoft)
 
     ' ==========================================
-    ' VERTICAL RIBS (Intersections + Sweeps)
+    ' VERTICAL RIBS (Intersections + Near Fix)
     ' ==========================================
     Dim dirNY: Set dirNY = hsf.AddNewDirectionByCoord(0, -1, 0)
     Dim dirX: Set dirX = hsf.AddNewDirectionByCoord(1, 0, 0)
@@ -140,10 +145,15 @@ vbscript_code += f"""
     Dim ribbonR: Set ribbonR = hsf.AddNewSweepExplicit(part1.CreateReferenceFromObject(lnR), splineRef): linesSet.AppendHybridShape ribbonR
     Dim ribbonL: Set ribbonL = hsf.AddNewSweepExplicit(part1.CreateReferenceFromObject(lnL), splineRef): linesSet.AppendHybridShape ribbonL
 
-    Dim crvU: Set crvU = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonU), sweepRef): crvU.Name = "Surface_Line_Top": linesSet.AppendHybridShape crvU
-    Dim crvD: Set crvD = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonD), sweepRef): crvD.Name = "Surface_Line_Bottom": linesSet.AppendHybridShape crvD
-    Dim crvR: Set crvR = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonR), sweepRef): crvR.Name = "Surface_Line_Right": linesSet.AppendHybridShape crvR
-    Dim crvL: Set crvL = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonL), sweepRef): crvL.Name = "Surface_Line_Left": linesSet.AppendHybridShape crvL
+    Dim rawU: Set rawU = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonU), sweepRef)
+    Dim rawD: Set rawD = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonD), sweepRef)
+    Dim rawR: Set rawR = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonR), sweepRef)
+    Dim rawL: Set rawL = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonL), sweepRef)
+
+    Dim crvU: Set crvU = hsf.AddNewNear(part1.CreateReferenceFromObject(rawU), ref1): crvU.Name = "Surface_Line_Top": linesSet.AppendHybridShape crvU
+    Dim crvD: Set crvD = hsf.AddNewNear(part1.CreateReferenceFromObject(rawD), ref1): crvD.Name = "Surface_Line_Bottom": linesSet.AppendHybridShape crvD
+    Dim crvR: Set crvR = hsf.AddNewNear(part1.CreateReferenceFromObject(rawR), ref1): crvR.Name = "Surface_Line_Right": linesSet.AppendHybridShape crvR
+    Dim crvL: Set crvL = hsf.AddNewNear(part1.CreateReferenceFromObject(rawL), ref1): crvL.Name = "Surface_Line_Left": linesSet.AppendHybridShape crvL
 
     ' Using dynamic Python variable {vert_rib_rad}
     Dim sweepU: Set sweepU = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvU)): sweepU.Mode = 6: sweepU.SetRadius 1, {vert_rib_rad}: sweepU.Name = "Sweep_Top": linesSet.AppendHybridShape sweepU
@@ -152,7 +162,7 @@ vbscript_code += f"""
     Dim sweepL: Set sweepL = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvL)): sweepL.Mode = 6: sweepL.SetRadius 1, {vert_rib_rad}: sweepL.Name = "Sweep_Left": linesSet.AppendHybridShape sweepL
 
     ' ==========================================
-    ' CIRCULAR RIBS (Equal Division + Multi-Domain Near Fix)
+    ' 5. CIRCULAR RIBS (Equal Division + Multi-Domain Near Fix)
     ' ==========================================
     part1.Update()
     
@@ -209,7 +219,7 @@ vbscript_code += f"""
     part1.Update()
 
     ' ==========================================
-    ' SOLIDIFICATION
+    ' 6. SOLIDIFICATION
     ' ==========================================
     Dim shapeFactory
     Set shapeFactory = part1.ShapeFactory
@@ -244,7 +254,7 @@ vbscript_code += f"""
     part1.Update()
 
     ' ==========================================
-    ' BOOLEAN ASSEMBLY
+    ' 7. BOOLEAN ASSEMBLY
     ' ==========================================
     part1.InWorkObject = part1.MainBody
     
@@ -265,6 +275,6 @@ st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
     data=vbscript_code,
-    file_name="Master_Ribbed_Tube.catvbs",
+    file_name="Master_Ribbed_Tube_Realistic.catvbs",
     mime="text/plain"
 )
