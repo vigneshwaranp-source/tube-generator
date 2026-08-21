@@ -3,7 +3,7 @@ import streamlit as st
 st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ CATIA V5: Realistic Ribbed Hose Generator")
-st.write("Enter DIAMETERS below. The app converts them to radii, applies domain filters, and generates a robust CATIA macro.")
+st.write("Enter DIAMETERS below. The app converts them to radii, applies domain filters, generates the solid body, and hides all construction geometry.")
 
 # --- 1. USER INTERFACE ---
 st.header("1. Tube Parameters")
@@ -267,6 +267,26 @@ vbscript_code += f"""
     part1.UpdateObject addCirc
 
     part1.Update()
+    
+    ' ==========================================
+    ' 8. HIDE ALL CONSTRUCTION GEOMETRY
+    ' ==========================================
+    Dim selection1
+    Set selection1 = partDocument1.Selection
+    selection1.Clear()
+    
+    ' Add the 3 Geometrical Sets to the selection
+    selection1.Add(geomSet)
+    selection1.Add(linesSet)
+    selection1.Add(circLinesSet)
+    
+    ' Access visual properties and switch to NoShow (1)
+    Dim visProperties1
+    Set visProperties1 = selection1.VisProperties
+    visProperties1.SetShow 1
+    
+    selection1.Clear()
+
 End Sub
 """
 
@@ -275,6 +295,6 @@ st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
     data=vbscript_code,
-    file_name="Master_Ribbed_Tube_Realistic.catvbs",
+    file_name="Master_Ribbed_Tube_Realistic_Hidden.catvbs",
     mime="text/plain"
 )
