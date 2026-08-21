@@ -10,9 +10,9 @@ st.header("1. Tube Parameters")
 col1, col2 = st.columns(2)
 with col1:
     main_thickness = st.number_input("Main Tube Thickness (mm)", value=2.5, step=0.5)
-    vert_rib_radius = st.number_input("Vertical Wire Radius (mm)", value=2.0, step=0.5) # Defaults to 4mm Dia
+    vert_rib_radius = st.number_input("Vertical Wire Radius (mm)", value=2.0, step=0.5) # 4mm Dia
 with col2:
-    circ_rib_radius = st.number_input("Circular Rib Radius (mm)", value=2.0, step=0.5) # Defaults to 4mm Dia
+    circ_rib_radius = st.number_input("Circular Rib Radius (mm)", value=2.0, step=0.5) # 4mm Dia
     circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=30.0, step=5.0)
 
 st.header("2. Spline Coordinates & Radii (7 Points)")
@@ -25,15 +25,16 @@ for i in range(1, 8):
     default_r = [25.0, 50.0, 20.0, 60.0, 30.0, 55.0, 25.0]
     
     with cols[0]:
-        pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"id{i}")
+        # Changed the internal key to "clean_id" to bust Streamlit's cache
+        pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"clean_id_{i}")
     with cols[1]:
-        x = st.number_input(f"P{i} X", value=default_x[i-1], key=f"x{i}")
+        x = st.number_input(f"P{i} X", value=default_x[i-1], key=f"clean_x_{i}")
     with cols[2]:
-        y = st.number_input(f"P{i} Y", value=default_y[i-1], key=f"y{i}")
+        y = st.number_input(f"P{i} Y", value=default_y[i-1], key=f"clean_y_{i}")
     with cols[3]:
-        z = st.number_input(f"P{i} Z", value=default_z[i-1], key=f"z{i}")
+        z = st.number_input(f"P{i} Z", value=default_z[i-1], key=f"clean_z_{i}")
     with cols[4]:
-        r = st.number_input(f"P{i} Radius", value=default_r[i-1], key=f"r{i}")
+        r = st.number_input(f"P{i} Radius", value=default_r[i-1], key=f"clean_r_{i}")
     
     points.append((pt_id, x, y, z, r))
 
