@@ -1,15 +1,62 @@
-Sub CATMain()
+import streamlit as st
+
+st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
+
+st.title("⚙️ CATIA V5: Freeflow Loft & Solid Rib Generator")
+st.write("Enter DIAMETERS below. The app will automatically calculate the true CATIA radii and generate the macro.")
+
+# --- 1. USER INTERFACE ---
+st.header("1. Tube Parameters")
+col1, col2 = st.columns(2)
+with col1:
+    main_thickness = st.number_input("Main Tube Thickness (mm)", value=3.5, step=0.5)
+    vert_rib_dia = st.number_input("Vertical Wire Diameter (mm)", value=3.8, step=0.2) 
+with col2:
+    circ_rib_dia = st.number_input("Circular Rib Diameter (mm)", value=4.0, step=0.2) 
+    circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=30.0, step=5.0)
+
+st.header("2. Spline Coordinates & Main Tube Diameters (7 Points)")
+points = []
+for i in range(1, 8):
+    cols = st.columns([1.5, 1, 1, 1, 1]) 
+    default_x = [0.0, 150.0, 300.0, 150.0, -100.0, -200.0, 0.0]
+    default_y = [0.0, 150.0, -50.0, -250.0, -100.0, 150.0, 300.0]
+    default_z = [0.0, 150.0, 300.0, 450.0, 600.0, 750.0, 900.0]
+    # Default Profile DIAMETERS
+    default_d = [50.0, 100.0, 40.0, 120.0, 60.0, 110.0, 50.0]
+    
+    with cols[0]:
+        pt_id = st.text_input(f"P{i} ID", value=f"Point_{i}", key=f"clean_id_{i}")
+    with cols[1]:
+        x = st.number_input(f"P{i} X", value=default_x[i-1], key=f"clean_x_{i}")
+    with cols[2]:
+        y = st.number_input(f"P{i} Y", value=default_y[i-1], key=f"clean_y_{i}")
+    with cols[3]:
+        z = st.number_input(f"P{i} Z", value=default_z[i-1], key=f"clean_z_{i}")
+    with cols[4]:
+        pd = st.number_input(f"P{i} Diameter", value=default_d[i-1], key=f"clean_d_{i}")
+    
+    points.append((pt_id, x, y, z, pd))
+
+# --- 2. VBSCRIPT GENERATION LOGIC ---
+# Automatically convert UI Diameters to CATIA Radii
+vert_rib_rad = vert_rib_dia / 2.0
+circ_rib_rad = circ_rib_dia / 2.0
+
+# Smart Failsafe: Prevent Boolean Crash if radii are perfectly identical
+if vert_rib_rad == circ_rib_rad:
+    vert_rib_rad = vert_rib_rad - 0.05
+
+vbscript_code = """Sub CATMain()
     Dim partDocument1
     
     ' ==========================================
     ' SMART DOCUMENT CHECK
     ' ==========================================
-    On Error Resume Next
-    Set partDocument1 = CATIA.ActiveDocument
-    On Error GoTo 0
-    
-    If IsEmpty(partDocument1) Or partDocument1 Is Nothing Then
+    If CATIA.Documents.Count = 0 Then
         Set partDocument1 = CATIA.Documents.Add("Part")
+    Else
+        Set partDocument1 = CATIA.ActiveDocument
     End If
     
     If TypeName(partDocument1) <> "PartDocument" Then
@@ -29,28 +76,16 @@ Sub CATMain()
     Dim circLinesSet: Set circLinesSet = hybridBodies1.Add(): circLinesSet.Name = "Circular_Lines"
 
     Dim spline: Set spline = hsf.AddNewSpline(): spline.SetSplineType 0: spline.SetClosing 0
+"""
 
-    Dim pt1: Set pt1 = hsf.AddNewPointCoord(0.0, 0.0, 0.0): pt1.Name = "30": geomSet.AppendHybridShape pt1
-    Dim ref1: Set ref1 = part1.CreateReferenceFromObject(pt1): spline.AddPoint ref1
+# Dynamically generate points
+for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
+    vbscript_code += f"""
+    Dim pt{i}: Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz}): pt{i}.Name = "{p_id}": geomSet.AppendHybridShape pt{i}
+    Dim ref{i}: Set ref{i} = part1.CreateReferenceFromObject(pt{i}): spline.AddPoint ref{i}
+"""
 
-    Dim pt2: Set pt2 = hsf.AddNewPointCoord(150.0, 150.0, 150.0): pt2.Name = "31": geomSet.AppendHybridShape pt2
-    Dim ref2: Set ref2 = part1.CreateReferenceFromObject(pt2): spline.AddPoint ref2
-
-    Dim pt3: Set pt3 = hsf.AddNewPointCoord(300.0, -50.0, 300.0): pt3.Name = "32": geomSet.AppendHybridShape pt3
-    Dim ref3: Set ref3 = part1.CreateReferenceFromObject(pt3): spline.AddPoint ref3
-
-    Dim pt4: Set pt4 = hsf.AddNewPointCoord(150.0, -250.0, 450.0): pt4.Name = "33": geomSet.AppendHybridShape pt4
-    Dim ref4: Set ref4 = part1.CreateReferenceFromObject(pt4): spline.AddPoint ref4
-
-    Dim pt5: Set pt5 = hsf.AddNewPointCoord(-100.0, -100.0, 600.0): pt5.Name = "34": geomSet.AppendHybridShape pt5
-    Dim ref5: Set ref5 = part1.CreateReferenceFromObject(pt5): spline.AddPoint ref5
-
-    Dim pt6: Set pt6 = hsf.AddNewPointCoord(-200.0, 150.0, 750.0): pt6.Name = "35": geomSet.AppendHybridShape pt6
-    Dim ref6: Set ref6 = part1.CreateReferenceFromObject(pt6): spline.AddPoint ref6
-
-    Dim pt7: Set pt7 = hsf.AddNewPointCoord(0.0, 300.0, 900.0): pt7.Name = "36": geomSet.AppendHybridShape pt7
-    Dim ref7: Set ref7 = part1.CreateReferenceFromObject(pt7): spline.AddPoint ref7
-
+vbscript_code += """
     geomSet.AppendHybridShape spline
     Dim splineRef: Set splineRef = part1.CreateReferenceFromObject(spline)
 
@@ -58,69 +93,32 @@ Sub CATMain()
     ' PLANES, CIRCLES & CLOSING POINTS
     ' ==========================================
     Dim dirY: Set dirY = hsf.AddNewDirectionByCoord(0, 1, 0)
+"""
 
-    Dim plane1: Set plane1 = hsf.AddNewPlaneNormal(splineRef, ref1): geomSet.AppendHybridShape plane1
-    Dim refPlane1: Set refPlane1 = part1.CreateReferenceFromObject(plane1)
-    Dim circle1: Set circle1 = hsf.AddNewCircleCtrRad(ref1, refPlane1, True, 25.0): geomSet.AppendHybridShape circle1
-    Dim refCircle1: Set refCircle1 = part1.CreateReferenceFromObject(circle1)
-    Dim closePt1: Set closePt1 = hsf.AddNewExtremum(refCircle1, dirY, 1): geomSet.AppendHybridShape closePt1
-    Dim refClosePt1: Set refClosePt1 = part1.CreateReferenceFromObject(closePt1)
+# Dynamically generate profiles (DIVIDES YOUR UI DIAMETER BY 2 FOR CATIA)
+for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
+    pr = pd / 2.0
+    vbscript_code += f"""
+    Dim plane{i}: Set plane{i} = hsf.AddNewPlaneNormal(splineRef, ref{i}): geomSet.AppendHybridShape plane{i}
+    Dim refPlane{i}: Set refPlane{i} = part1.CreateReferenceFromObject(plane{i})
+    Dim circle{i}: Set circle{i} = hsf.AddNewCircleCtrRad(ref{i}, refPlane{i}, True, {pr}): geomSet.AppendHybridShape circle{i}
+    Dim refCircle{i}: Set refCircle{i} = part1.CreateReferenceFromObject(circle{i})
+    Dim closePt{i}: Set closePt{i} = hsf.AddNewExtremum(refCircle{i}, dirY, 1): geomSet.AppendHybridShape closePt{i}
+    Dim refClosePt{i}: Set refClosePt{i} = part1.CreateReferenceFromObject(closePt{i})
+"""
 
-    Dim plane2: Set plane2 = hsf.AddNewPlaneNormal(splineRef, ref2): geomSet.AppendHybridShape plane2
-    Dim refPlane2: Set refPlane2 = part1.CreateReferenceFromObject(plane2)
-    Dim circle2: Set circle2 = hsf.AddNewCircleCtrRad(ref2, refPlane2, True, 50.0): geomSet.AppendHybridShape circle2
-    Dim refCircle2: Set refCircle2 = part1.CreateReferenceFromObject(circle2)
-    Dim closePt2: Set closePt2 = hsf.AddNewExtremum(refCircle2, dirY, 1): geomSet.AppendHybridShape closePt2
-    Dim refClosePt2: Set refClosePt2 = part1.CreateReferenceFromObject(closePt2)
-
-    Dim plane3: Set plane3 = hsf.AddNewPlaneNormal(splineRef, ref3): geomSet.AppendHybridShape plane3
-    Dim refPlane3: Set refPlane3 = part1.CreateReferenceFromObject(plane3)
-    Dim circle3: Set circle3 = hsf.AddNewCircleCtrRad(ref3, refPlane3, True, 20.0): geomSet.AppendHybridShape circle3
-    Dim refCircle3: Set refCircle3 = part1.CreateReferenceFromObject(circle3)
-    Dim closePt3: Set closePt3 = hsf.AddNewExtremum(refCircle3, dirY, 1): geomSet.AppendHybridShape closePt3
-    Dim refClosePt3: Set refClosePt3 = part1.CreateReferenceFromObject(closePt3)
-
-    Dim plane4: Set plane4 = hsf.AddNewPlaneNormal(splineRef, ref4): geomSet.AppendHybridShape plane4
-    Dim refPlane4: Set refPlane4 = part1.CreateReferenceFromObject(plane4)
-    Dim circle4: Set circle4 = hsf.AddNewCircleCtrRad(ref4, refPlane4, True, 60.0): geomSet.AppendHybridShape circle4
-    Dim refCircle4: Set refCircle4 = part1.CreateReferenceFromObject(circle4)
-    Dim closePt4: Set closePt4 = hsf.AddNewExtremum(refCircle4, dirY, 1): geomSet.AppendHybridShape closePt4
-    Dim refClosePt4: Set refClosePt4 = part1.CreateReferenceFromObject(closePt4)
-
-    Dim plane5: Set plane5 = hsf.AddNewPlaneNormal(splineRef, ref5): geomSet.AppendHybridShape plane5
-    Dim refPlane5: Set refPlane5 = part1.CreateReferenceFromObject(plane5)
-    Dim circle5: Set circle5 = hsf.AddNewCircleCtrRad(ref5, refPlane5, True, 30.0): geomSet.AppendHybridShape circle5
-    Dim refCircle5: Set refCircle5 = part1.CreateReferenceFromObject(circle5)
-    Dim closePt5: Set closePt5 = hsf.AddNewExtremum(refCircle5, dirY, 1): geomSet.AppendHybridShape closePt5
-    Dim refClosePt5: Set refClosePt5 = part1.CreateReferenceFromObject(closePt5)
-
-    Dim plane6: Set plane6 = hsf.AddNewPlaneNormal(splineRef, ref6): geomSet.AppendHybridShape plane6
-    Dim refPlane6: Set refPlane6 = part1.CreateReferenceFromObject(plane6)
-    Dim circle6: Set circle6 = hsf.AddNewCircleCtrRad(ref6, refPlane6, True, 55.0): geomSet.AppendHybridShape circle6
-    Dim refCircle6: Set refCircle6 = part1.CreateReferenceFromObject(circle6)
-    Dim closePt6: Set closePt6 = hsf.AddNewExtremum(refCircle6, dirY, 1): geomSet.AppendHybridShape closePt6
-    Dim refClosePt6: Set refClosePt6 = part1.CreateReferenceFromObject(closePt6)
-
-    Dim plane7: Set plane7 = hsf.AddNewPlaneNormal(splineRef, ref7): geomSet.AppendHybridShape plane7
-    Dim refPlane7: Set refPlane7 = part1.CreateReferenceFromObject(plane7)
-    Dim circle7: Set circle7 = hsf.AddNewCircleCtrRad(ref7, refPlane7, True, 25.0): geomSet.AppendHybridShape circle7
-    Dim refCircle7: Set refCircle7 = part1.CreateReferenceFromObject(circle7)
-    Dim closePt7: Set closePt7 = hsf.AddNewExtremum(refCircle7, dirY, 1): geomSet.AppendHybridShape closePt7
-    Dim refClosePt7: Set refClosePt7 = part1.CreateReferenceFromObject(closePt7)
-
+vbscript_code += f"""
     ' ==========================================
     ' MAIN TUBE LOFT (Freeflow)
     ' ==========================================
     Dim mainLoft: Set mainLoft = hsf.AddNewLoft()
     mainLoft.SectionCoupling = 1
-    mainLoft.AddSectionToLoft refCircle1, 1, refClosePt1
-    mainLoft.AddSectionToLoft refCircle2, 1, refClosePt2
-    mainLoft.AddSectionToLoft refCircle3, 1, refClosePt3
-    mainLoft.AddSectionToLoft refCircle4, 1, refClosePt4
-    mainLoft.AddSectionToLoft refCircle5, 1, refClosePt5
-    mainLoft.AddSectionToLoft refCircle6, 1, refClosePt6
-    mainLoft.AddSectionToLoft refCircle7, 1, refClosePt7
+"""
 
+for i in range(1, 8):
+    vbscript_code += f"    mainLoft.AddSectionToLoft refCircle{i}, 1, refClosePt{i}\n"
+
+vbscript_code += f"""
     mainLoft.Name = "Main_Tube_Surface"
     geomSet.AppendHybridShape mainLoft
     Dim sweepRef: Set sweepRef = part1.CreateReferenceFromObject(mainLoft)
@@ -147,11 +145,11 @@ Sub CATMain()
     Dim crvR: Set crvR = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonR), sweepRef): crvR.Name = "Surface_Line_Right": linesSet.AppendHybridShape crvR
     Dim crvL: Set crvL = hsf.AddNewIntersection(part1.CreateReferenceFromObject(ribbonL), sweepRef): crvL.Name = "Surface_Line_Left": linesSet.AppendHybridShape crvL
 
-    ' FIX: Set Vertical Ribs to 1.9mm Radius (3.8mm Dia) to prevent zero-thickness Boolean clash
-    Dim sweepU: Set sweepU = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvU)): sweepU.Mode = 6: sweepU.SetRadius 1, 1.9: sweepU.Name = "Sweep_Top": linesSet.AppendHybridShape sweepU
-    Dim sweepD: Set sweepD = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvD)): sweepD.Mode = 6: sweepD.SetRadius 1, 1.9: sweepD.Name = "Sweep_Bottom": linesSet.AppendHybridShape sweepD
-    Dim sweepR: Set sweepR = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvR)): sweepR.Mode = 6: sweepR.SetRadius 1, 1.9: sweepR.Name = "Sweep_Right": linesSet.AppendHybridShape sweepR
-    Dim sweepL: Set sweepL = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvL)): sweepL.Mode = 6: sweepL.SetRadius 1, 1.9: sweepL.Name = "Sweep_Left": linesSet.AppendHybridShape sweepL
+    ' Using dynamic Python variable {vert_rib_rad}
+    Dim sweepU: Set sweepU = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvU)): sweepU.Mode = 6: sweepU.SetRadius 1, {vert_rib_rad}: sweepU.Name = "Sweep_Top": linesSet.AppendHybridShape sweepU
+    Dim sweepD: Set sweepD = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvD)): sweepD.Mode = 6: sweepD.SetRadius 1, {vert_rib_rad}: sweepD.Name = "Sweep_Bottom": linesSet.AppendHybridShape sweepD
+    Dim sweepR: Set sweepR = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvR)): sweepR.Mode = 6: sweepR.SetRadius 1, {vert_rib_rad}: sweepR.Name = "Sweep_Right": linesSet.AppendHybridShape sweepR
+    Dim sweepL: Set sweepL = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvL)): sweepL.Mode = 6: sweepL.SetRadius 1, {vert_rib_rad}: sweepL.Name = "Sweep_Left": linesSet.AppendHybridShape sweepL
 
     ' ==========================================
     ' CIRCULAR RIBS (Equal Division + Multi-Domain Near Fix)
@@ -167,7 +165,7 @@ Sub CATMain()
     totalLength = measurableSpline.Length
     
     Dim targetSpacing
-    targetSpacing = 30.0 
+    targetSpacing = {circ_rib_spacing} 
     
     Dim numDivisions
     numDivisions = Int(totalLength / targetSpacing)
@@ -199,11 +197,11 @@ Sub CATMain()
         nearIntersect.Name = "Circ_Intersection_" & CStr(i)
         circLinesSet.AppendHybridShape nearIntersect
         
-        ' FIX: Set Circular Ribs to 2.0mm Radius (4mm Dia). By being 0.1mm larger than the vertical ribs, the Boolean engine computes the split cleanly!
+        ' Using dynamic Python variable {circ_rib_rad}
         Dim circSweep
         Set circSweep = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(nearIntersect))
         circSweep.Mode = 6
-        circSweep.SetRadius 1, 2.0
+        circSweep.SetRadius 1, {circ_rib_rad}
         circSweep.Name = "Circ_Sweep_" & CStr(i)
         circLinesSet.AppendHybridShape circSweep
     Next
@@ -218,7 +216,7 @@ Sub CATMain()
     
     part1.InWorkObject = part1.MainBody
     Dim thickMain
-    Set thickMain = shapeFactory.AddNewThickSurface(sweepRef, 1, 3.5, 0.0)
+    Set thickMain = shapeFactory.AddNewThickSurface(sweepRef, 1, {main_thickness}, 0.0)
     
     Dim bodyVert
     Set bodyVert = part1.Bodies.Add()
@@ -260,3 +258,13 @@ Sub CATMain()
 
     part1.Update()
 End Sub
+"""
+
+# --- 3. DOWNLOAD BUTTON ---
+st.header("3. Generate & Download")
+st.download_button(
+    label="⬇️ Download CATIA Macro (.catvbs)",
+    data=vbscript_code,
+    file_name="Master_Ribbed_Tube.catvbs",
+    mime="text/plain"
+)
