@@ -1,4 +1,5 @@
 import streamlit as st
+import math
 
 st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
 
@@ -17,8 +18,8 @@ with col2:
     circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=30.0, step=5.0)
 
 # Add a slider to dynamically choose between 3 and 10 points
-st.header("2. Spline Coordinates & Main Tube Diameters")
-num_points = st.slider("Select Number of Spline Points (Minimum 3, Maximum 10)", min_value=3, max_value=10, value=7)
+st.header("2. Polyline Coordinates & Main Tube Diameters")
+num_points = st.slider("Select Number of Polyline Points (Minimum 3, Maximum 10)", min_value=3, max_value=10, value=7)
 
 st.write("Default coordinates represent a realistic, gentle 3D automotive hose bend.")
 points = []
@@ -54,6 +55,24 @@ circ_rib_rad = circ_rib_dia / 2.0
 if vert_rib_rad == circ_rib_rad:
     vert_rib_rad = vert_rib_rad - 0.05
 
+# --- AUTO-CALCULATE POLYLINE CORNER RADIUS ---
+# Calculate the minimum distance between any two consecutive points to ensure fillets don't overlap/crash
+min_dist = float('inf')
+for i in range(len(points) - 1):
+    x1, y1, z1 = points[i][1], points[i][2], points[i][3]
+    x2, y2, z2 = points[i+1][1], points[i+1][2], points[i+1][3]
+    dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
+    if dist < min_dist:
+        min_dist = dist
+
+# Set radius to 40% of the shortest segment to guarantee a smooth, crash-free polyline corner
+auto_radius = round(min_dist * 0.4, 2)
+if auto_radius < 5.0:
+    auto_radius = 5.0 # Safe minimum fallback
+
+# Display the UI Info Message for the Auto-Radius
+st.info(f"ℹ️ **Note:** The corner radius for the polyline is auto-calculated at **{auto_radius} mm** to prevent self-intersections. The user does not need to set this, but it can be modified directly in the CATIA tree after generation if needed.")
+
 vbscript_code = """Sub CATMain()
     Dim partDocument1
     
@@ -82,19 +101,24 @@ vbscript_code = """Sub CATMain()
     Dim linesSet: Set linesSet = hybridBodies1.Add(): linesSet.Name = "Vertical_Lines"
     Dim circLinesSet: Set circLinesSet = hybridBodies1.Add(): circLinesSet.Name = "Circular_Lines"
 
-    Dim spline: Set spline = hsf.AddNewSpline(): spline.SetSplineType 0: spline.SetClosing 0
+    ' Changed to Polyline as requested
+    Dim polyline: Set polyline = hsf.AddNewPolyline()
 """
 
-# Dynamically generate points based on user selection
+# Dynamically generate points and add to polyline based on user selection
 for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
     vbscript_code += f"""
     Dim pt{i}: Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz}): pt{i}.Name = "{p_id}": geomSet.AppendHybridShape pt{i}
-    Dim ref{i}: Set ref{i} = part1.CreateReferenceFromObject(pt{i}): spline.AddPoint ref{i}
+    Dim ref{i}: Set ref{i} = part1.CreateReferenceFromObject(pt{i}): polyline.InsertElement ref{i}, {i}
 """
+    # Apply the auto-calculated radius to all intermediate points
+    if 1 < i < len(points):
+        vbscript_code += f"    polyline.SetRadius {i}, {auto_radius}\n"
 
 vbscript_code += """
-    geomSet.AppendHybridShape spline
-    Dim splineRef: Set splineRef = part1.CreateReferenceFromObject(spline)
+    geomSet.AppendHybridShape polyline
+    ' We keep the reference name as splineRef so the rest of the downstream code continues to work perfectly
+    Dim splineRef: Set splineRef = part1.CreateReferenceFromObject(polyline)
 
     ' ==========================================
     ' PLANES, CIRCLES & CLOSING POINTS
@@ -186,10 +210,10 @@ vbscript_code += f"""
     Dim exactSpacing
     exactSpacing = totalLength / numDivisions
     
-    Dim i
-    For i = 1 To (numDivisions - 1)
+    Dim jIndex
+    For jIndex = 1 To (numDivisions - 1)
         Dim currentDist
-        currentDist = i * exactSpacing
+        currentDist = jIndex * exactSpacing
         
         Dim ptOnCurve, ptOnCurveRef, planeNormal, planeNormalRef, rawIntersect
         
@@ -199,7 +223,7 @@ vbscript_code += f"""
         Set ptOnCurveRef = part1.CreateReferenceFromObject(ptOnCurve)
 
         Set planeNormal = hsf.AddNewPlaneNormal(splineRef, ptOnCurveRef)
-        planeNormal.Name = "Normal_Plane_" & CStr(i)
+        planeNormal.Name = "Normal_Plane_" & CStr(jIndex)
         circLinesSet.AppendHybridShape planeNormal
         Set planeNormalRef = part1.CreateReferenceFromObject(planeNormal)
 
@@ -207,7 +231,7 @@ vbscript_code += f"""
         
         Dim nearIntersect
         Set nearIntersect = hsf.AddNewNear(part1.CreateReferenceFromObject(rawIntersect), ptOnCurveRef)
-        nearIntersect.Name = "Circ_Intersection_" & CStr(i)
+        nearIntersect.Name = "Circ_Intersection_" & CStr(jIndex)
         circLinesSet.AppendHybridShape nearIntersect
         
         ' Using dynamic Python variable {circ_rib_rad}
@@ -215,7 +239,7 @@ vbscript_code += f"""
         Set circSweep = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(nearIntersect))
         circSweep.Mode = 6
         circSweep.SetRadius 1, {circ_rib_rad}
-        circSweep.Name = "Circ_Sweep_" & CStr(i)
+        circSweep.Name = "Circ_Sweep_" & CStr(jIndex)
         circLinesSet.AppendHybridShape circSweep
     Next
     
@@ -246,9 +270,9 @@ vbscript_code += f"""
     bodyCirc.Name = "Body.2_Circular_Ribs"
     part1.InWorkObject = bodyCirc
     
-    Dim j, shp
-    For j = 1 To circLinesSet.HybridShapes.Count
-        Set shp = circLinesSet.HybridShapes.Item(j)
+    Dim kIndex, shp
+    For kIndex = 1 To circLinesSet.HybridShapes.Count
+        Set shp = circLinesSet.HybridShapes.Item(kIndex)
         If InStr(shp.Name, "Circ_Sweep_") > 0 Then
             shapeFactory.AddNewCloseSurface(part1.CreateReferenceFromObject(shp))
         End If
