@@ -249,9 +249,14 @@ vbscript_code += f"""
     sel.Add closeOuter
     sel.Copy()
     sel.Clear()
+    
+    part1.InWorkObject = bodyInner
     sel.Add bodyInner
     sel.PasteSpecial "CATPrtResultWithOutLink"
     sel.Clear()
+    
+    ' FORCE UPDATE: This is the fix. CATIA needs to register the newly pasted solid.
+    part1.Update()
     
     ' E) Apply Negative Thickness to the pasted Solid
     part1.InWorkObject = bodyInner
@@ -331,10 +336,12 @@ vbscript_code += f"""
     Set selection1 = partDocument1.Selection
     selection1.Clear()
     
+    ' Add the 3 Geometrical Sets to the selection
     selection1.Add(geomSet)
     selection1.Add(linesSet)
     selection1.Add(circLinesSet)
     
+    ' Access visual properties and switch to NoShow (1)
     Dim visProperties1
     Set visProperties1 = selection1.VisProperties
     visProperties1.SetShow 1
