@@ -1,4 +1,5 @@
 import streamlit as st
+import math
 
 st.set_page_config(page_title="CATIA Ribbed Tube Generator", page_icon="⚙️", layout="wide")
 
@@ -10,20 +11,17 @@ st.header("1. Tube Parameters")
 col1, col2 = st.columns(2)
 with col1:
     main_thickness = st.number_input("Main Tube Thickness (mm)", value=3.5, step=0.5)
-    # Hinting to the user to keep vertical slightly smaller than circular for Boolean success
     vert_rib_dia = st.number_input("Vertical Wire Diameter (mm)", value=3.8, step=0.2) 
 with col2:
     circ_rib_dia = st.number_input("Circular Rib Diameter (mm)", value=4.0, step=0.2) 
     circ_rib_spacing = st.number_input("Circular Rib Spacing (mm)", value=30.0, step=5.0)
 
-# Add a slider to dynamically choose between 3 and 10 points
 st.header("2. Spline Coordinates & Main Tube Diameters")
 num_points = st.slider("Select Number of Spline Points (Minimum 3, Maximum 10)", min_value=3, max_value=10, value=7)
 
 st.write("Default coordinates represent a realistic, gentle 3D automotive hose bend.")
 points = []
 
-# Expanded default arrays to support up to 10 points
 default_x = [0.0, 0.0, 30.0, 100.0, 250.0, 400.0, 550.0, 700.0, 850.0, 1000.0]
 default_y = [0.0, 0.0, 0.0, 50.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
 default_z = [0.0, 150.0, 300.0, 420.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
@@ -45,21 +43,44 @@ for i in range(1, num_points + 1):
     
     points.append((pt_id, x, y, z, pd))
 
-# --- 2. VBSCRIPT GENERATION LOGIC ---
-# Automatically convert UI Diameters to CATIA Radii
+# --- 2. VECTOR MATH: 5MM STRAIGHT SECTION LOGIC ---
+final_points = []
+if len(points) >= 2:
+    p1 = points[0]
+    p2 = points[1]
+    
+    x1, y1, z1 = p1[1], p1[2], p1[3]
+    x2, y2, z2 = p2[1], p2[2], p2[3]
+    
+    # Calculate 3D distance between Point 1 and Point 2
+    dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
+    
+    final_points.append(p1) # Add original Point 1
+    
+    # Only insert if the distance to point 2 is actually greater than 5mm
+    if dist > 5.0:
+        # Calculate unit vector components and multiply by 5mm
+        nx = x1 + 5.0 * ((x2 - x1) / dist)
+        ny = y1 + 5.0 * ((y2 - y1) / dist)
+        nz = z1 + 5.0 * ((z2 - z1) / dist)
+        
+        # Inherit the diameter from Point 1 to keep it straight
+        final_points.append(("Point_1_5mm_Offset", nx, ny, nz, p1[4]))
+        
+    final_points.extend(points[1:]) # Add the rest of the points
+else:
+    final_points = points
+
+# --- 3. VBSCRIPT GENERATION LOGIC ---
 vert_rib_rad = vert_rib_dia / 2.0
 circ_rib_rad = circ_rib_dia / 2.0
 
-# Smart Failsafe: Prevent Boolean Crash if radii are perfectly identical
 if vert_rib_rad == circ_rib_rad:
     vert_rib_rad = vert_rib_rad - 0.05
 
 vbscript_code = """Sub CATMain()
     Dim partDocument1
     
-    ' ==========================================
-    ' SMART DOCUMENT CHECK
-    ' ==========================================
     If CATIA.Documents.Count = 0 Then
         Set partDocument1 = CATIA.Documents.Add("Part")
     Else
@@ -75,9 +96,6 @@ vbscript_code = """Sub CATMain()
     Dim hsf: Set hsf = part1.HybridShapeFactory
     Dim hybridBodies1: Set hybridBodies1 = part1.HybridBodies
     
-    ' ==========================================
-    ' GEOMETRICAL SETS
-    ' ==========================================
     Dim geomSet: Set geomSet = hybridBodies1.Add(): geomSet.Name = "Macro_Tube_Geometry"
     Dim linesSet: Set linesSet = hybridBodies1.Add(): linesSet.Name = "Vertical_Lines"
     Dim circLinesSet: Set circLinesSet = hybridBodies1.Add(): circLinesSet.Name = "Circular_Lines"
@@ -85,8 +103,8 @@ vbscript_code = """Sub CATMain()
     Dim spline: Set spline = hsf.AddNewSpline(): spline.SetSplineType 0: spline.SetClosing 0
 """
 
-# Dynamically generate points based on user selection
-for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
+# Iterate over the new final_points array which includes the 5mm offset
+for i, (p_id, px, py, pz, pd) in enumerate(final_points, start=1):
     vbscript_code += f"""
     Dim pt{i}: Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz}): pt{i}.Name = "{p_id}": geomSet.AppendHybridShape pt{i}
     Dim ref{i}: Set ref{i} = part1.CreateReferenceFromObject(pt{i}): spline.AddPoint ref{i}
@@ -95,15 +113,10 @@ for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
 vbscript_code += """
     geomSet.AppendHybridShape spline
     Dim splineRef: Set splineRef = part1.CreateReferenceFromObject(spline)
-
-    ' ==========================================
-    ' PLANES, CIRCLES & CLOSING POINTS
-    ' ==========================================
     Dim dirY: Set dirY = hsf.AddNewDirectionByCoord(0, 1, 0)
 """
 
-# Dynamically generate profiles (DIVIDES YOUR UI DIAMETER BY 2 FOR CATIA)
-for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
+for i, (p_id, px, py, pz, pd) in enumerate(final_points, start=1):
     pr = pd / 2.0
     vbscript_code += f"""
     Dim plane{i}: Set plane{i} = hsf.AddNewPlaneNormal(splineRef, ref{i}): geomSet.AppendHybridShape plane{i}
@@ -115,15 +128,11 @@ for i, (p_id, px, py, pz, pd) in enumerate(points, start=1):
 """
 
 vbscript_code += f"""
-    ' ==========================================
-    ' MAIN TUBE LOFT (Freeflow)
-    ' ==========================================
     Dim mainLoft: Set mainLoft = hsf.AddNewLoft()
     mainLoft.SectionCoupling = 1
 """
 
-# Dynamically link the exact number of selected sections to the loft
-for i in range(1, len(points) + 1):
+for i in range(1, len(final_points) + 1):
     vbscript_code += f"    mainLoft.AddSectionToLoft refCircle{i}, 1, refClosePt{i}\n"
 
 vbscript_code += f"""
@@ -131,9 +140,6 @@ vbscript_code += f"""
     geomSet.AppendHybridShape mainLoft
     Dim sweepRef: Set sweepRef = part1.CreateReferenceFromObject(mainLoft)
 
-    ' ==========================================
-    ' VERTICAL RIBS (Intersections + Near Fix)
-    ' ==========================================
     Dim dirNY: Set dirNY = hsf.AddNewDirectionByCoord(0, -1, 0)
     Dim dirX: Set dirX = hsf.AddNewDirectionByCoord(1, 0, 0)
     Dim dirNX: Set dirNX = hsf.AddNewDirectionByCoord(-1, 0, 0)
@@ -158,15 +164,11 @@ vbscript_code += f"""
     Dim crvR: Set crvR = hsf.AddNewNear(part1.CreateReferenceFromObject(rawR), ref1): crvR.Name = "Surface_Line_Right": linesSet.AppendHybridShape crvR
     Dim crvL: Set crvL = hsf.AddNewNear(part1.CreateReferenceFromObject(rawL), ref1): crvL.Name = "Surface_Line_Left": linesSet.AppendHybridShape crvL
 
-    ' Using dynamic Python variable {vert_rib_rad}
     Dim sweepU: Set sweepU = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvU)): sweepU.Mode = 6: sweepU.SetRadius 1, {vert_rib_rad}: sweepU.Name = "Sweep_Top": linesSet.AppendHybridShape sweepU
     Dim sweepD: Set sweepD = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvD)): sweepD.Mode = 6: sweepD.SetRadius 1, {vert_rib_rad}: sweepD.Name = "Sweep_Bottom": linesSet.AppendHybridShape sweepD
     Dim sweepR: Set sweepR = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvR)): sweepR.Mode = 6: sweepR.SetRadius 1, {vert_rib_rad}: sweepR.Name = "Sweep_Right": linesSet.AppendHybridShape sweepR
     Dim sweepL: Set sweepL = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(crvL)): sweepL.Mode = 6: sweepL.SetRadius 1, {vert_rib_rad}: sweepL.Name = "Sweep_Left": linesSet.AppendHybridShape sweepL
 
-    ' ==========================================
-    ' 5. CIRCULAR RIBS (Equal Division + Multi-Domain Near Fix)
-    ' ==========================================
     part1.Update()
     
     Dim TheSPAWorkbench
@@ -210,7 +212,6 @@ vbscript_code += f"""
         nearIntersect.Name = "Circ_Intersection_" & CStr(i)
         circLinesSet.AppendHybridShape nearIntersect
         
-        ' Using dynamic Python variable {circ_rib_rad}
         Dim circSweep
         Set circSweep = hsf.AddNewSweepCircle(part1.CreateReferenceFromObject(nearIntersect))
         circSweep.Mode = 6
@@ -221,9 +222,6 @@ vbscript_code += f"""
     
     part1.Update()
 
-    ' ==========================================
-    ' 6. SOLIDIFICATION
-    ' ==========================================
     Dim shapeFactory
     Set shapeFactory = part1.ShapeFactory
     
@@ -255,10 +253,6 @@ vbscript_code += f"""
     Next
 
     part1.Update()
-
-    ' ==========================================
-    ' 7. BOOLEAN ASSEMBLY
-    ' ==========================================
     part1.InWorkObject = part1.MainBody
     
     Dim addVert
@@ -271,19 +265,14 @@ vbscript_code += f"""
 
     part1.Update()
     
-    ' ==========================================
-    ' 8. HIDE ALL CONSTRUCTION GEOMETRY
-    ' ==========================================
     Dim selection1
     Set selection1 = partDocument1.Selection
     selection1.Clear()
     
-    ' Add the 3 Geometrical Sets to the selection
     selection1.Add(geomSet)
     selection1.Add(linesSet)
     selection1.Add(circLinesSet)
     
-    ' Access visual properties and switch to NoShow (1)
     Dim visProperties1
     Set visProperties1 = selection1.VisProperties
     visProperties1.SetShow 1
@@ -293,7 +282,7 @@ vbscript_code += f"""
 End Sub
 """
 
-# --- 3. DOWNLOAD BUTTON ---
+# --- 4. DOWNLOAD BUTTON ---
 st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
