@@ -215,85 +215,32 @@ vbscript_code += f"""
     
     part1.Update()
 
-    ' ==========================================
-    ' 6. SOLIDIFICATION (Exact Workflow: Copy, Thickness, Remove)
-    ' ==========================================
     Dim shapeFactory
     Set shapeFactory = part1.ShapeFactory
-    
-    ' A) Create Body.4 (Outer Tube)
+
+    ' ==========================================
+    ' STEP 1: CREATE MAIN OUTER BODY & ASSEMBLE
+    ' ==========================================
     Dim bodyOuter
     Set bodyOuter = part1.Bodies.Add()
-    bodyOuter.Name = "Body.4"
+    bodyOuter.Name = "Body.Outer_Tube"
     part1.InWorkObject = bodyOuter
     
     Dim closeOuter
     Set closeOuter = shapeFactory.AddNewCloseSurface(sweepRef)
     part1.Update()
     
-    ' B) Assemble Body.4 into MainBody (Creates Assemble.1)
     part1.InWorkObject = part1.MainBody
     Dim assembleOuter
     Set assembleOuter = shapeFactory.AddNewAssemble(bodyOuter)
     part1.UpdateObject assembleOuter
-    
-    ' C) Create Body.6 (Inner Void Core)
-    Dim bodyInner
-    Set bodyInner = part1.Bodies.Add()
-    bodyInner.Name = "Body.6"
-    
-    ' D) Copy CloseSurface and Paste Special As Result into Body.6
-    Dim sel
-    Set sel = partDocument1.Selection
-    sel.Clear()
-    sel.Add closeOuter
-    sel.Copy()
-    sel.Clear()
-    
-    part1.InWorkObject = bodyInner
-    sel.Add bodyInner
-    sel.PasteSpecial "CATPrtResultWithOutLink"
-    sel.Clear()
-    
-    ' FORCE UPDATE: This is the fix. CATIA needs to register the newly pasted solid.
-    part1.Update()
-    
-    ' E) Apply Negative Thickness to the pasted Solid
-    part1.InWorkObject = bodyInner
-    Dim pastedSolid
-    Set pastedSolid = bodyInner.Shapes.Item(1) ' This is Solid.2
-    
-    ' Search for all faces of the pasted solid to apply 3D thickness
-    sel.Add pastedSolid
-    sel.Search "Topology.CGMFace,sel"
-    
-    If sel.Count > 0 Then
-        Dim firstFace
-        Set firstFace = sel.Item(1).Reference
-        Dim thickCore
-        ' Apply negative thickness to reduce the solid by user value
-        Set thickCore = shapeFactory.AddNewSolidThickness(firstFace, -{main_thickness})
-        
-        Dim fFace
-        For fFace = 2 To sel.Count
-            thickCore.AddFaceToThicken sel.Item(fFace).Reference
-        Next
-        part1.UpdateObject thickCore
-    End If
-    sel.Clear()
-    
-    ' F) Remove Body.6 from MainBody (Creates Remove.3)
-    part1.InWorkObject = part1.MainBody
-    Dim removeInner
-    Set removeInner = shapeFactory.AddNewRemove(bodyInner)
-    part1.UpdateObject removeInner
 
     ' ==========================================
-    ' 7. BOOLEAN ASSEMBLY (Ribs)
+    ' STEP 2: CREATE RIBS & ASSEMBLE
     ' ==========================================
     Dim bodyVert
     Set bodyVert = part1.Bodies.Add()
-    bodyVert.Name = "Body.1_Vertical_Ribs"
+    bodyVert.Name = "Body.Vertical_Ribs"
     part1.InWorkObject = bodyVert
     
     shapeFactory.AddNewCloseSurface(part1.CreateReferenceFromObject(sweepU))
@@ -303,7 +250,7 @@ vbscript_code += f"""
     
     Dim bodyCirc
     Set bodyCirc = part1.Bodies.Add()
-    bodyCirc.Name = "Body.2_Circular_Ribs"
+    bodyCirc.Name = "Body.Circular_Ribs"
     part1.InWorkObject = bodyCirc
     
     Dim j, shp
@@ -316,9 +263,7 @@ vbscript_code += f"""
 
     part1.Update()
     
-    ' Assemble Ribs into MainBody
     part1.InWorkObject = part1.MainBody
-    
     Dim assembleVert
     Set assembleVert = shapeFactory.AddNewAssemble(bodyVert)
     part1.UpdateObject assembleVert
@@ -326,32 +271,80 @@ vbscript_code += f"""
     Dim assembleCirc
     Set assembleCirc = shapeFactory.AddNewAssemble(bodyCirc)
     part1.UpdateObject assembleCirc
+    part1.Update()
 
+    ' ==========================================
+    ' STEP 3: CREATE INNER VOID CORE, COPY, PASTE, & THICKNESS
+    ' ==========================================
+    Dim bodyInner
+    Set bodyInner = part1.Bodies.Add()
+    bodyInner.Name = "Body.Inner_Void_Core"
+    
+    Dim sel
+    Set sel = partDocument1.Selection
+    sel.Clear()
+    
+    ' Copy the original CloseSurface
+    sel.Add closeOuter
+    sel.Copy()
+    sel.Clear()
+    
+    ' Paste it into the new Inner Body as a result
+    part1.InWorkObject = bodyInner
+    sel.Add bodyInner
+    sel.PasteSpecial "CATPrtResultWithOutLink"
+    sel.Clear()
+    
+    ' Force CATIA to refresh so the pasted solid is recognized in the tree
     part1.Update()
     
+    ' DYNAMIC SAFETY CHECK: Ensure the solid exists before selecting it
+    If bodyInner.Shapes.Count > 0 Then
+        ' Always grab the last item added to avoid Item(1) index errors
+        Dim pastedSolid
+        Set pastedSolid = bodyInner.Shapes.Item(bodyInner.Shapes.Count)
+        
+        ' Search for all faces of the newly pasted solid
+        sel.Add pastedSolid
+        sel.Search "Topology.CGMFace,sel"
+        
+        If sel.Count > 0 Then
+            Dim firstFace
+            Set firstFace = sel.Item(1).Reference
+            Dim thickCore
+            ' Apply negative thickness to shrink the solid
+            Set thickCore = shapeFactory.AddNewSolidThickness(firstFace, -{main_thickness})
+            
+            Dim fFace
+            For fFace = 2 To sel.Count
+                thickCore.AddFaceToThicken sel.Item(fFace).Reference
+            Next
+            part1.UpdateObject thickCore
+        End If
+        sel.Clear()
+    End If
+    
+    ' NOTE: As requested, the Boolean Remove operation has been intentionally omitted here.
+    ' Body.Inner_Void_Core remains isolated in the tree.
+
     ' ==========================================
     ' 8. HIDE ALL CONSTRUCTION GEOMETRY
     ' ==========================================
-    Dim selection1
-    Set selection1 = partDocument1.Selection
-    selection1.Clear()
+    sel.Clear()
+    sel.Add(geomSet)
+    sel.Add(linesSet)
+    sel.Add(circLinesSet)
     
-    ' Add the 3 Geometrical Sets to the selection
-    selection1.Add(geomSet)
-    selection1.Add(linesSet)
-    selection1.Add(circLinesSet)
-    
-    ' Access visual properties and switch to NoShow (1)
     Dim visProperties1
-    Set visProperties1 = selection1.VisProperties
+    Set visProperties1 = sel.VisProperties
     visProperties1.SetShow 1
     
-    selection1.Clear()
+    sel.Clear()
 
 End Sub
 """
 
-# --- 3. DOWNLOAD BUTTON ---
+# --- 4. DOWNLOAD BUTTON ---
 st.header("3. Generate & Download")
 st.download_button(
     label="⬇️ Download CATIA Macro (.catvbs)",
