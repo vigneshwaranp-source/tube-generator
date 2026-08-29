@@ -222,15 +222,52 @@ vbscript_code += f"""
     part1.Update()
 
     ' ==========================================
-    ' 6. SOLIDIFICATION
+    ' 6. SOLIDIFICATION (Boolean Close & Remove)
     ' ==========================================
     Dim shapeFactory
     Set shapeFactory = part1.ShapeFactory
     
-    part1.InWorkObject = part1.MainBody
-    Dim thickMain
-    Set thickMain = shapeFactory.AddNewThickSurface(sweepRef, 1, {main_thickness}, 0.0)
+    ' A) Create Body.4 (Outer Tube)
+    Dim bodyOuter
+    Set bodyOuter = part1.Bodies.Add()
+    bodyOuter.Name = "Body.4"
+    part1.InWorkObject = bodyOuter
     
+    Dim closeOuter
+    Set closeOuter = shapeFactory.AddNewCloseSurface(sweepRef)
+    part1.Update()
+    
+    ' B) Assemble Body.4 into MainBody (Creates Assemble.1)
+    part1.InWorkObject = part1.MainBody
+    Dim assembleOuter
+    Set assembleOuter = shapeFactory.AddNewAssemble(bodyOuter)
+    part1.UpdateObject assembleOuter
+    
+    ' C) Create Inner Void Surface (Offset Inward by Thickness)
+    Dim innerOffset
+    Set innerOffset = hsf.AddNewOffset(sweepRef, {main_thickness}, False, 0.01)
+    innerOffset.Name = "Inner_Tube_Offset"
+    geomSet.AppendHybridShape innerOffset
+    
+    ' D) Create Body.6 (Inner Void Core)
+    Dim bodyInner
+    Set bodyInner = part1.Bodies.Add()
+    bodyInner.Name = "Body.6"
+    part1.InWorkObject = bodyInner
+    
+    Dim closeInner
+    Set closeInner = shapeFactory.AddNewCloseSurface(part1.CreateReferenceFromObject(innerOffset))
+    part1.Update()
+    
+    ' E) Remove Body.6 from MainBody (Creates Remove.3)
+    part1.InWorkObject = part1.MainBody
+    Dim removeInner
+    Set removeInner = shapeFactory.AddNewRemove(bodyInner)
+    part1.UpdateObject removeInner
+
+    ' ==========================================
+    ' 7. BOOLEAN ASSEMBLY (Ribs)
+    ' ==========================================
     Dim bodyVert
     Set bodyVert = part1.Bodies.Add()
     bodyVert.Name = "Body.1_Vertical_Ribs"
@@ -255,19 +292,17 @@ vbscript_code += f"""
     Next
 
     part1.Update()
-
-    ' ==========================================
-    ' 7. BOOLEAN ASSEMBLY
-    ' ==========================================
+    
+    ' Assemble Ribs into MainBody (Matches Assemble.2 and Assemble.3 from image)
     part1.InWorkObject = part1.MainBody
     
-    Dim addVert
-    Set addVert = shapeFactory.AddNewAdd(bodyVert)
-    part1.UpdateObject addVert
+    Dim assembleVert
+    Set assembleVert = shapeFactory.AddNewAssemble(bodyVert)
+    part1.UpdateObject assembleVert
     
-    Dim addCirc
-    Set addCirc = shapeFactory.AddNewAdd(bodyCirc)
-    part1.UpdateObject addCirc
+    Dim assembleCirc
+    Set assembleCirc = shapeFactory.AddNewAssemble(bodyCirc)
+    part1.UpdateObject assembleCirc
 
     part1.Update()
     
