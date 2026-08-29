@@ -52,22 +52,25 @@ if len(points) >= 2:
     x1, y1, z1 = p1[1], p1[2], p1[3]
     x2, y2, z2 = p2[1], p2[2], p2[3]
     
-    # Calculate 3D distance between Point 1 and Point 2
+    # Calculate total 3D distance between Point 1 and Point 2
     dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
     
-    final_points.append(p1) # Add original Point 1
+    final_points.append(p1) # Always add the original Point 1
     
-    # Only insert if the distance to point 2 is actually greater than 5mm
+    # Only insert the offset point if the distance to point 2 is greater than 5mm
     if dist > 5.0:
-        # Calculate unit vector components and multiply by 5mm
+        # UNIVERSAL VECTOR LOGIC (Works from ANY starting coordinate)
+        # 1. (x2 - x1) / dist  --> Extracts the pure 3D direction vector
+        # 2. * 5.0             --> Scales that direction to exactly 5mm
+        # 3. x1 + ...          --> Adds that 5mm step starting from Point 1's true location
         nx = x1 + 5.0 * ((x2 - x1) / dist)
         ny = y1 + 5.0 * ((y2 - y1) / dist)
         nz = z1 + 5.0 * ((z2 - z1) / dist)
         
-        # Inherit the diameter from Point 1 to keep it straight
+        # Inherit the diameter from Point 1 to keep the tube straight
         final_points.append(("Point_1_5mm_Offset", nx, ny, nz, p1[4]))
         
-    final_points.extend(points[1:]) # Add the rest of the points
+    final_points.extend(points[1:]) # Add all remaining points
 else:
     final_points = points
 
@@ -103,7 +106,6 @@ vbscript_code = """Sub CATMain()
     Dim spline: Set spline = hsf.AddNewSpline(): spline.SetSplineType 0: spline.SetClosing 0
 """
 
-# Iterate over the new final_points array which includes the 5mm offset
 for i, (p_id, px, py, pz, pd) in enumerate(final_points, start=1):
     vbscript_code += f"""
     Dim pt{i}: Set pt{i} = hsf.AddNewPointCoord({px}, {py}, {pz}): pt{i}.Name = "{p_id}": geomSet.AppendHybridShape pt{i}
