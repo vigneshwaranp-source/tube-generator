@@ -274,58 +274,43 @@ vbscript_code += f"""
     part1.Update()
 
     ' ==========================================
-    ' STEP 3: CREATE INNER VOID CORE, COPY, PASTE, & THICKNESS
+    ' STEP 3: CREATE INNER VOID CORE & APPLY THICKNESS
     ' ==========================================
     Dim bodyInner
     Set bodyInner = part1.Bodies.Add()
     bodyInner.Name = "Body.Inner_Void_Core"
+    part1.InWorkObject = bodyInner
+    
+    ' Bypass the Windows clipboard by generating an identical CloseSurface
+    ' from the master loft. This guarantees the solid exists immediately.
+    Dim closeInner
+    Set closeInner = shapeFactory.AddNewCloseSurface(sweepRef)
+    part1.UpdateObject closeInner
     
     Dim sel
     Set sel = partDocument1.Selection
     sel.Clear()
     
-    ' Copy the original CloseSurface
-    sel.Add closeOuter
-    sel.Copy()
-    sel.Clear()
+    ' Search for all faces of this newly created solid
+    sel.Add closeInner
+    sel.Search "Topology.CGMFace,sel"
     
-    ' Paste it into the new Inner Body as a result
-    part1.InWorkObject = bodyInner
-    sel.Add bodyInner
-    sel.PasteSpecial "CATPrtResultWithOutLink"
-    sel.Clear()
-    
-    ' Force CATIA to refresh so the pasted solid is recognized in the tree
-    part1.Update()
-    
-    ' DYNAMIC SAFETY CHECK: Ensure the solid exists before selecting it
-    If bodyInner.Shapes.Count > 0 Then
-        ' Always grab the last item added to avoid Item(1) index errors
-        Dim pastedSolid
-        Set pastedSolid = bodyInner.Shapes.Item(bodyInner.Shapes.Count)
+    If sel.Count > 0 Then
+        Dim firstFace
+        Set firstFace = sel.Item(1).Reference
+        Dim thickCore
+        ' Apply negative thickness to shrink the solid
+        Set thickCore = shapeFactory.AddNewSolidThickness(firstFace, -{main_thickness})
         
-        ' Search for all faces of the newly pasted solid
-        sel.Add pastedSolid
-        sel.Search "Topology.CGMFace,sel"
-        
-        If sel.Count > 0 Then
-            Dim firstFace
-            Set firstFace = sel.Item(1).Reference
-            Dim thickCore
-            ' Apply negative thickness to shrink the solid
-            Set thickCore = shapeFactory.AddNewSolidThickness(firstFace, -{main_thickness})
-            
-            Dim fFace
-            For fFace = 2 To sel.Count
-                thickCore.AddFaceToThicken sel.Item(fFace).Reference
-            Next
-            part1.UpdateObject thickCore
-        End If
-        sel.Clear()
+        Dim fFace
+        For fFace = 2 To sel.Count
+            thickCore.AddFaceToThicken sel.Item(fFace).Reference
+        Next
+        part1.UpdateObject thickCore
     End If
+    sel.Clear()
     
-    ' NOTE: As requested, the Boolean Remove operation has been intentionally omitted here.
-    ' Body.Inner_Void_Core remains isolated in the tree.
+    ' Body.Inner_Void_Core is intentionally left isolated in the tree (No Remove operation)
 
     ' ==========================================
     ' 8. HIDE ALL CONSTRUCTION GEOMETRY
