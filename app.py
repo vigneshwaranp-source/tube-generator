@@ -132,6 +132,18 @@ vbscript_code += f"""
     mainLoft.Name = "Main_Tube_Surface"
     geomSet.AppendHybridShape mainLoft
     Dim sweepRef: Set sweepRef = part1.CreateReferenceFromObject(mainLoft)
+    
+    ' ==========================================
+    ' NEW: CREATE INNER OFFSET SURFACE (3.5mm INWARD)
+    ' ==========================================
+    ' The False flag inverts the orientation so the offset goes inward
+    Dim innerOffset
+    Set innerOffset = hsf.AddNewOffset(sweepRef, {main_thickness}, False, 0.01)
+    innerOffset.Name = "Inner_Tube_Offset_Surface"
+    geomSet.AppendHybridShape innerOffset
+    Dim offsetRef
+    Set offsetRef = part1.CreateReferenceFromObject(innerOffset)
+    part1.Update()
 
     Dim dirNY: Set dirNY = hsf.AddNewDirectionByCoord(0, -1, 0)
     Dim dirX: Set dirX = hsf.AddNewDirectionByCoord(1, 0, 0)
@@ -274,64 +286,31 @@ vbscript_code += f"""
     part1.Update()
 
     ' ==========================================
-    ' STEP 3: CREATE INNER VOID CORE, COPY, PASTE WITH LINK, & THICKNESS
+    ' STEP 3: CREATE INNER VOID CORE (VIA OFFSET SURFACE) & REMOVE
     ' ==========================================
     Dim bodyInner
     Set bodyInner = part1.Bodies.Add()
     bodyInner.Name = "Body.Inner_Void_Core"
-    
-    Dim sel
-    Set sel = partDocument1.Selection
-    sel.Clear()
-    
-    ' Copy the original CloseSurface feature
-    sel.Add closeOuter
-    sel.Copy()
-    sel.Clear()
-    
-    ' Paste it into the new Inner Body AS RESULT WITH LINK
     part1.InWorkObject = bodyInner
-    sel.Add bodyInner
-    sel.PasteSpecial "CATPrtResultWithLink"
-    sel.Clear()
     
-    ' Force CATIA to refresh so the pasted solid is fully registered in the tree
+    ' Apply CloseSurface directly to the new Offset Surface
+    Dim closeInner
+    Set closeInner = shapeFactory.AddNewCloseSurface(offsetRef)
     part1.Update()
     
-    ' Ensure the solid exists before attempting to apply thickness
-    If bodyInner.Shapes.Count > 0 Then
-        ' Grab the newly pasted solid (usually the last item)
-        Dim pastedSolid
-        Set pastedSolid = bodyInner.Shapes.Item(bodyInner.Shapes.Count)
-        
-        ' Search for all faces of the pasted solid
-        sel.Add pastedSolid
-        sel.Search "Topology.CGMFace,sel"
-        
-        If sel.Count > 0 Then
-            Dim firstFace
-            Set firstFace = sel.Item(1).Reference
-            
-            Dim thickCore
-            ' CORRECT API: AddNewThickness (Creates a 3D Thickness feature)
-            Set thickCore = shapeFactory.AddNewThickness(firstFace, -{main_thickness})
-            
-            Dim fFace
-            For fFace = 2 To sel.Count
-                thickCore.AddFaceToThicken sel.Item(fFace).Reference
-            Next
-            
-            part1.UpdateObject thickCore
-        End If
-        sel.Clear()
-    End If
-    
-    ' NOTE: Body.Inner_Void_Core is left isolated per your instructions.
+    ' Perform Boolean Remove on the MainBody to hollow out the tube
+    part1.InWorkObject = part1.MainBody
+    Dim removeInner
+    Set removeInner = shapeFactory.AddNewRemove(bodyInner)
+    part1.UpdateObject removeInner
 
     ' ==========================================
     ' 8. HIDE ALL CONSTRUCTION GEOMETRY
     ' ==========================================
+    Dim sel
+    Set sel = partDocument1.Selection
     sel.Clear()
+    
     sel.Add(geomSet)
     sel.Add(linesSet)
     sel.Add(circLinesSet)
